@@ -199,3 +199,14 @@ retry could pay twice.
 - **The screened EVM identity is not cryptographically linked to the Sui payout address** (see the
   caveat above).
 - A hosted, multi-tenant API gateway remains roadmap only.
+
+## 2026-09-26 — Intercepta screen verified live
+
+With a real `INTERCEPTA_API_KEY`, the console's five invoices were run through a fresh dev server:
+acme returned its recorded settlement (no second payment); suspended-corp REFUSED /
+PREMISE_MISMATCH; the spoofed globex invoice REFUSED / PREMISE_MISMATCH on a live screen of the
+OFAC-listed Lazarus address (5 risk traits, toxicScore 100); the genuine globex bank change and the
+$15,000 halcyon invoice both screened clean (0 traits) and are HELD_FOR_STEPUP. The first live call
+exposed an Intercepta schema mismatch (`txsCount` absent on some traits), fixed in the adapter; see
+FEEDBACK/intercepta.md. Still not run live: the World step-up and `settleWithStepUp` (needs a person
+to complete World ID on a phone), and the Xero source (needs Xero credentials).

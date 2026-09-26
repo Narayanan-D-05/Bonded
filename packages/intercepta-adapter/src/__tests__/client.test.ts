@@ -269,6 +269,33 @@ describe('parseToxicScoreResponse: fails closed on a non-conforming shape', () =
     expect(() => parseToxicScoreResponse({ toxicScore: 1, traits: [], somethingElse: true })).toThrow(InterceptaShapeError);
   });
 
+  // The live API omits txsCount on some traits (real Deep Scan of the OFAC-listed
+  // Lazarus address, 2026-09-26; see FEEDBACK/intercepta.md). These inputs test OUR
+  // parser's key rules only; they are not presented as Intercepta responses.
+  test('accepts a trait with no txsCount key (live API behaviour), and leaves it undefined', () => {
+    const parsed = parseToxicScoreResponse({ toxicScore: 1, traits: [{ risk: 1, name: 'blacklist', description: 'x' }] });
+    expect(parsed.traits).toHaveLength(1);
+    expect(parsed.traits[0]!.txsCount).toBeUndefined();
+  });
+
+  test('still rejects an undocumented extra key on a trait', () => {
+    expect(() =>
+      parseToxicScoreResponse({ toxicScore: 1, traits: [{ risk: 1, name: 'blacklist', description: 'x', surprise: 1 }] }),
+    ).toThrow(InterceptaShapeError);
+  });
+
+  test('still rejects a trait missing a required key (description)', () => {
+    expect(() => parseToxicScoreResponse({ toxicScore: 1, traits: [{ risk: 1, name: 'blacklist' }] })).toThrow(
+      InterceptaShapeError,
+    );
+  });
+
+  test('still rejects a present-but-invalid txsCount', () => {
+    expect(() =>
+      parseToxicScoreResponse({ toxicScore: 1, traits: [{ risk: 1, name: 'blacklist', txsCount: -1, description: 'x' }] }),
+    ).toThrow(InterceptaShapeError);
+  });
+
   test('every documented trait name is accepted by the enum guard', () => {
     for (const name of DOCUMENTED_TRAIT_NAMES) {
       expect(() =>
