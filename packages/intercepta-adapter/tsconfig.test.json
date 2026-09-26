@@ -4,9 +4,6 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": [
-    "src",
-    "scripts"
-  ],
+  "include": ["src", "scripts"],
   "exclude": []
 }
