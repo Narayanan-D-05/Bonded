@@ -39,16 +39,66 @@ loop, the Intercepta adapter, the Sui settlement objects, the World step-up — 
 | Every possible attacker-writable field | Only price, event status and seller-authorization are re-derived | A broader premise vocabulary |
 | Live legal KYC beyond World's own verification | World's sandbox proof is the identity check this build uses | A production KYC/AML integration |
 
-## Not yet built (updated as phases complete)
+## 2026-09-26 — B2B pivot: Business Email Compromise (BEC) in accounts-payable automation
 
-- `packages/enforcer` — being rebuilt from the Implementation PRD's D.2 spec (git history for the
-  original ETHOnline version was lost; see FEEDBACK/sui.md).
+The pitch is now a definite, named B2B use case rather than a generic "agentic commerce" demo: an
+autonomous AP agent pays a vendor invoice, and the invoice or a "we changed our bank account" email
+was spoofed by an attacker impersonating the real vendor. This is not a hypothetical threat —
+**Business Email Compromise cost $3.04 billion in 2025 per the FBI's IC3 2025 Annual Report** (up
+from $2.77B the year before; BEC is the #2 crime type by total dollar loss; ~$123,000 average loss
+per incident; 86% of losses moved via wire/ACH), and it is the concrete reason enterprises currently
+refuse to let agents touch payables autonomously. Source:
+https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf — fetched and verified before writing
+this figure down; never guessed.
+
+**Delivery form, decided:** an npm SDK first (`packages/seam`, `enforcer`, `dispatcher`,
+`issuer-oracle`, `intercepta-adapter`, `world-agents` are all already shaped for publishing —
+`exports`/`main`/`types`/`files`, just `"private": true`), with `packages/mcp-server` as a thin MCP
+wrapper — the concrete, working answer to "usable inside an agent framework with no glue code." A
+hosted multi-tenant gateway is named as roadmap only; it was not built.
+
+**The BEC-specific mechanism, additive to the enforcer, not a rewrite:** a `Premise` can now be
+marked `holdOnMismatch: true`. On mismatch, this produces `HELD_FOR_STEPUP` /
+`PREMISE_HELD_FOR_REVIEW` instead of a hard `REFUSED`. This exists because a vendor's payout address
+changing is simultaneously the actual fraud signal *and* something that happens legitimately — a
+blanket refuse is unusable in practice, so this specific mismatch is routed to a mandatory human/
+World-ID check instead of an automatic block. An invoice amount mismatch or a suspended vendor,
+by contrast, still hard-refuses: those are not "maybe legitimate."
+
+**The vendor-master oracle is the new disclosed stand-in**, replacing the ticket/ecomm framing as
+the primary pitch narrative (their fixtures and tests stay; they're demoted to "also demonstrated,"
+not deleted). Same honesty rule as before, restated for this data: `packages/issuer-oracle`'s
+`vendor-fixture.ts` is a controlled, seeded stand-in for a real vendor-master/ERP system (NetSuite,
+SAP, QuickBooks, etc.), never presented as a live feed.
+
+**A real limitation found while building the demo villain, not fixed and not hidden:** every payout
+address in this project's fixtures is Sui-shaped (32 bytes). Intercepta's screening endpoints only
+accept a 20-byte EVM address or an ENS name (`docs/VERIFY_FINDINGS.md` item 5). This means the
+optional "screen the fraudulent payout address via Intercepta" step in `packages/villain-corpus`
+cannot run for this address format — with or without a real API key — and correctly fails visibly
+rather than being silently skipped. **What would close it:** a real deployment would need vendor
+payout addresses tracked as EVM addresses (or a linked EVM identity per vendor, the same
+Sui/EVM-linkage pattern the abandoned Hostage Protocol design used for agent identity) so Intercepta
+can actually screen them; Sui remains the settlement/audit-trail layer regardless.
+
+**Newly built, all verified independently (not taken on a subagent's word) and committed:**
+`packages/enforcer` (with `holdOnMismatch`), `packages/dispatcher` (the schema-to-adapter router
+`enforce()` always assumed existed but nothing built until now), `packages/issuer-oracle`'s vendor
+fixture, `packages/villain-corpus` (the spoofed-invoice artifact, replacing the earlier planned
+scalper-ticket villain as the primary demo), `packages/mcp-server`, and `apps/console`'s Invoice
+Inbox + step-up route.
+
+## Not yet built
+
 - `move/` — the Hostage-era `bond_vault` package (`0x990acf44…0d43` on Sui testnet) is abandoned;
-  a fresh `bonded_registry` + `bonded_vault` + `verdict` package, matching PRD D.7, is pending.
-- `packages/intercepta-adapter` — being adapted from the Hostage-era live client.
-- `packages/world-agents` — being adapted from the Hostage-era World OIDC flow.
-- `packages/issuer-oracle` — new, not yet built.
-- `packages/villain-corpus` — the scalper ticket page and bait-and-switch checkout; not yet built.
-  (Named differently from the PRD's `packages/attack-corpus` because that name is already used by the
-  original ETHOnline villain, whose `results.json` is a protected artifact this project never edits.)
-- `apps/console`'s `/shop` screen and the World step-up route — not yet built.
+  a Commerce Edition `bonded_registry` + `bonded_vault` (`0xf3d914b3…bf57a`) is live, but nothing in
+  this B2B pivot's TypeScript layer settles against it yet — `enforce()`'s output is not currently
+  wired to a real on-chain `settle`/`settle_with_stepup` call from the console or MCP server. This is
+  the largest remaining gap before an end-to-end, on-chain demo is possible.
+- `site/spoofed-invoice.html` (in `packages/villain-corpus`) is a complete, real static file but is
+  **not hosted anywhere** — needs an actual Vercel/GitHub Pages deployment so it's a clickable,
+  inspectable artifact, not just a local file.
+- A natural-language "intent → PolicyArtifact" compiler — explicitly out of scope. Every
+  `PolicyArtifact` in this build (villain-corpus, console, mcp-server) is a hand-authored object,
+  same as the test fixtures; disclosed as a scope limit, not a gap silently filled.
+- A hosted, multi-tenant API gateway — named as roadmap only, per the delivery-form decision above.
