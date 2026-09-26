@@ -1,18 +1,30 @@
 /**
- * World ID for Agents: the OIDC relying-party flow. Server-side only.
+ * World ID for Agents: the OIDC relying-party step-up flow. Server-side only.
  *
- * PRD Part H, World row 2: "Validate in a secure backend." Nothing in this file may be
- * imported into browser code. It reads the confidential client's secret from the
- * environment, holds the PKCE verifier, and redeems the authorization code. None of
- * those three may ever reach a browser.
+ * Migration PRD D.6: "Validate identity results in a secure backend; do not expose client
+ * secrets or treat an unvalidated client response as authorization." Nothing in this file
+ * may be imported into browser code. It reads the confidential client's secret from the
+ * environment, holds the PKCE verifier, and redeems the authorization code. None of those
+ * three may ever reach a browser.
  *
- * Every endpoint, value and claim below was confirmed against the live sandbox, not
- * assumed. The discovery document and JWKS were re-fetched 2026-09-25 23:44 UTC, and the
- * public `oidc` and `step-up` guides were re-read through the sandbox MCP `get_idp_guide`:
+ * This is the OIDC-mechanics half of `packages/world-agents`, ported from the now-deleted
+ * `identity/src/world-flow.ts` (built for the Hostage Protocol's Recovery Desk). The
+ * mechanics — discovery, PKCE, the authorization URL, token exchange, JWKS verification —
+ * do not change at all in this migration; PRD D.6 itself says so: "The underlying OIDC
+ * mechanics ... are exactly what the Commerce Edition's step-up needs too." What changes is
+ * what the flow is FOR: instead of gating an agent-wide LOCKED state keyed by `agentName`,
+ * `initiateStepUp`/`handleCallback` below gate one specific `proposalHash` — see
+ * `stepup-gate.ts` for the fresh-enough/matching-enough decision built on top of this file's
+ * `handleCallback` result.
+ *
+ * Every endpoint, value and claim below was confirmed against the live sandbox, re-probed
+ * 2026-09-26 immediately before writing this file (`FEEDBACK/world.md` records the
+ * re-probe): the discovery document and JWKS matched docs/VERIFY_FINDINGS.md items 3a-3d
+ * exactly, no drift.
  *
  *   issuer                      https://sandbox.auth.world.org
  *   authorization_endpoint      /api/v1/authorize        (code flow, query response mode)
- *   token_endpoint              /api/v1/token            (client_secret_basic | _post | private_key_jwt)
+ *   token_endpoint               /api/v1/token            (client_secret_basic | _post | private_key_jwt)
  *   jwks_uri                    /.well-known/jwks.json   (one RSA-2048 RS256 key, kid = RFC 7638 thumbprint)
  *   scopes_supported            ["openid"]               ("exactly scope=openid")
  *   code_challenge_methods      ["S256"]
@@ -21,21 +33,27 @@
  *   acr_values_supported        ["https://world.org/oidc/acr/orb-v3"]
  *   no userinfo_endpoint        ("read claims from the validated ID token")
  *
- * From the guides:
+ * From the sandbox's own `oidc`/`step-up` guides (VERIFY_FINDINGS 3a):
  *   - "Codes are single-use and last five minutes." "ID tokens last five minutes."
  *   - The ID token carries iss, sub, aud, exp, iat, jti, auth_time, acr and amr. It
  *     "includes nonce only when supplied in the authorization request". This flow always
  *     supplies one.
  *   - "Use auth_time for freshness, never iat."
  *   - Step-up: "max_age=0: Require this transaction's own fresh World proof, even with an
- *     existing browser session." "acr_values: Voluntary preferences ... validate the
- *     achieved acr yourself." "amr is ["pop"]."
+ *     existing browser session." `amr` is `["pop"]`.
  *   - "Dependency failures must remain distinguishable from invalid authentication."
  *   - "Never log request bodies, Authorization headers, or callback query strings."
  */
 
 import { createHash, randomBytes } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import type { Hash32 } from '@bonded/seam';
+import {
+  JsonFileStepUpStore,
+  type StepUpAttempt,
+  type StepUpState,
+  type StepUpStore,
+} from './store.js';
 
 export const WORLD_SANDBOX_ISSUER = 'https://sandbox.auth.world.org';
 /** The only scope the IdP supports. */
@@ -54,6 +72,8 @@ export const ID_TOKEN_ALG = 'RS256';
 export const CLOCK_SKEW_SECONDS = 30;
 /** Bounded requests; the guide says "use bounded requests". */
 export const REQUEST_TIMEOUT_MS = 10_000;
+/** How long a started attempt waits for its callback before it is `expired`. */
+export const ATTEMPT_TTL_SECONDS = 600;
 
 /** Env var names, read at call time and never at import. */
 export const WORLD_ENV = {
@@ -257,7 +277,8 @@ export interface AuthorizationUrlInput {
   codeChallenge: string;
   /**
    * `0` asks for "this transaction's own fresh World proof, even with an existing browser
-   * session". Every flow in this package uses 0, because both are human moments.
+   * session". Every flow in this package uses 0, because a step-up above the irreversible
+   * threshold is exactly that kind of moment.
    */
   maxAge?: number;
   acrValues?: readonly string[];
@@ -486,7 +507,7 @@ function remoteKeySet(jwksUri: string): ReturnType<typeof createRemoteJWKSet> {
   return set;
 }
 
-/** `acr` must be orb-v3 and `amr` must include `pop`. Shared with the Recovery Desk. */
+/** `acr` must be orb-v3 and `amr` must include `pop`. Shared with `stepup-gate.ts`. */
 export function assuranceProblem(acr: unknown, amr: unknown, requiredAcr: string = ACR_ORB_V3): string | null {
   if (acr !== requiredAcr) return `acr is ${typeof acr === 'string' ? acr : 'absent'}, required ${requiredAcr}`;
   if (!Array.isArray(amr) || !amr.includes(AMR_PROOF_OF_POSSESSION)) {
@@ -508,7 +529,7 @@ function joseCode(error: unknown): string | undefined {
  * Checks: RS256 signature by a published key, exact `iss`, `aud` = our client id, `exp`
  * (with explicit skew), `nonce` = the one this attempt sent, `acr` = orb-v3, `amr` has
  * `pop`, and `sub`/`auth_time`/`iat` present and well-typed. Freshness policy (how old
- * `auth_time` may be) is the caller's decision; see `recovery-desk.ts`.
+ * `auth_time` may be) is the caller's decision; see `stepup-gate.ts`.
  */
 export async function verifyIdToken(input: {
   discovery: DiscoveryDocument;
@@ -582,4 +603,279 @@ export async function verifyIdToken(input: {
 
 export function describe(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+// ─── Proposal-scoped step-up orchestration (Migration PRD D.6) ─────────────
+
+/**
+ * PRD D.6's request shape verbatim: a step-up is always for a specific `proposalHash`,
+ * with a `reason` shown to the human ("confirm purchase of 2 tickets, $90.00,
+ * non-refundable"). Unlike the old Recovery Desk there is no `agentName` — this gates a
+ * purchase, not an agent's owner identity.
+ */
+export interface WorldStepUpRequest {
+  proposalHash: Hash32;
+  reason: string;
+}
+
+export interface InitiateStepUpResult {
+  authUrl: string;
+  state: string;
+}
+
+/**
+ * The three outcomes PRD D.6's sketch names, plus what the gate actually needs:
+ * `authTimeMs` (freshness, in milliseconds since `auth_time` is Unix seconds and the rest
+ * of this codebase's clocks are `Date.now()`-shaped) and a machine-checkable `reason` for
+ * the denied case. `stepup-gate.ts` maps every internal `DeniedReason` onto this string, so
+ * the reasons named in the task ("access_denied", state/nonce mismatch, replayed code, ...)
+ * are exactly the values that land here.
+ */
+export type HandleCallbackResult =
+  | { verified: true; sub: string; authTimeMs: number }
+  | { denied: true; reason: string }
+  | { expired: true };
+
+export class StepUpFlowError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StepUpFlowError';
+  }
+}
+
+const AGENT_NAME_SAFE_HASH32 = /^0x[0-9a-fA-F]{64}$/;
+
+function requireProposalHash(proposalHash: string): Hash32 {
+  if (!AGENT_NAME_SAFE_HASH32.test(proposalHash)) {
+    throw new StepUpFlowError(`proposalHash must be a 32-byte 0x-hash, got ${JSON.stringify(proposalHash)}`);
+  }
+  return proposalHash as Hash32;
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+/**
+ * The stateful half of PRD D.6's sketch, bundled into a class so it is constructible with
+ * an injected store/discovery/clock for tests, and so the plain `initiateStepUp`/
+ * `handleCallback` functions below can be a thin default-singleton wrapper around it for
+ * real callers (the console's `/api/stepup` route, `scripts/world-live.ts`).
+ *
+ * Everything a proposal-scoped attempt needs beyond the pure OIDC layer above — single-use
+ * `state`/`nonce`, single-use authorization codes, and an attempt TTL that turns into the
+ * `{ expired: true }` outcome — lives here, adapted directly from the old Recovery Desk's
+ * `acceptCallback`. What's deliberately NOT here: any concept of an agent, an owner
+ * binding, or a LOCKED status. Those belonged to the abandoned Hostage Protocol.
+ */
+export class WorldStepUpFlow {
+  private readonly store: StepUpStore;
+  private readonly discovery: DiscoveryDocument;
+  private readonly config: () => WorldClientConfig;
+  private readonly now: () => number;
+
+  constructor(options: {
+    store: StepUpStore;
+    discovery: DiscoveryDocument;
+    config?: () => WorldClientConfig;
+    /** Unix seconds. */
+    now?: () => number;
+  }) {
+    this.store = options.store;
+    this.discovery = options.discovery;
+    this.config = options.config ?? (() => readWorldClientConfig());
+    this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
+  }
+
+  /** Live discovery plus the default JSON-file store, for real (non-test) callers. */
+  static async create(options: { store?: StepUpStore; issuer?: string } = {}): Promise<WorldStepUpFlow> {
+    const discovery = await discover(options.issuer);
+    return new WorldStepUpFlow({ store: options.store ?? new JsonFileStepUpStore(), discovery });
+  }
+
+  async initiateStepUp(req: WorldStepUpRequest): Promise<InitiateStepUpResult> {
+    const proposalHash = requireProposalHash(req.proposalHash);
+    if (!req.reason || req.reason.trim() === '') {
+      throw new StepUpFlowError('reason must be a non-empty, human-readable string');
+    }
+    const config = this.config();
+    const now = this.now();
+    const pkce = createPkce();
+    const attempt: StepUpAttempt = {
+      state: randomToken(),
+      nonce: randomToken(),
+      codeVerifier: pkce.verifier,
+      proposalHash,
+      reason: req.reason,
+      createdAt: now,
+    };
+    await this.store.update((s) => {
+      s.attempts[attempt.state] = attempt;
+      s.log.push({ at: now, kind: 'started', proposalHash, detail: req.reason });
+    });
+    const authUrl = buildAuthorizationUrl({
+      discovery: this.discovery,
+      clientId: config.clientId,
+      redirectUri: config.redirectUri,
+      state: attempt.state,
+      nonce: attempt.nonce,
+      codeChallenge: pkce.challenge,
+      maxAge: 0,
+      acrValues: [ACR_ORB_V3],
+    });
+    return { authUrl, state: attempt.state };
+  }
+
+  /**
+   * Intake a callback, redeem the code at the live token endpoint, verify the ID token
+   * against the live JWKS, and record the decision. Server-side only (PRD H.2).
+   *
+   * The single-use checks (state lookup, code-hash replay, attempt TTL) happen in one
+   * atomic store update *before* the code is ever sent to the token endpoint, exactly like
+   * the old Recovery Desk's `acceptCallback` — so a duplicated callback can never reach the
+   * IdP twice, and a stolen/leaked code that's replayed here is refused without a network
+   * call at all.
+   */
+  async handleCallback(code: string, state: string): Promise<HandleCallbackResult> {
+    const now = this.now();
+    const intake = await this.store.update((s): { ok: true; attempt: StepUpAttempt } | HandleCallbackResult => {
+      const attempt = s.attempts[state];
+      const denyIntake = (reason: string, spend: boolean): HandleCallbackResult => {
+        if (spend && attempt && attempt.spentAt === undefined) attempt.spentAt = now;
+        this.record(s, now, attempt?.proposalHash, false, reason);
+        return { denied: true, reason };
+      };
+      if (state === '' || state === undefined) return denyIntake('state_mismatch', false);
+      if (!attempt) return denyIntake('state_mismatch', false);
+      if (code === '' || code === undefined) return denyIntake('malformed_callback', true);
+
+      const codeHash = sha256Hex(code);
+      if (s.usedCodeHashes[codeHash] !== undefined) {
+        attempt.spentAt = attempt.spentAt ?? now;
+        this.record(s, now, attempt.proposalHash, false, 'replayed_code');
+        return { denied: true, reason: 'replayed_code' };
+      }
+      if (attempt.spentAt !== undefined) {
+        s.usedCodeHashes[codeHash] = now;
+        this.record(s, now, attempt.proposalHash, false, 'replayed_nonce');
+        return { denied: true, reason: 'replayed_nonce' };
+      }
+      if (now - attempt.createdAt > ATTEMPT_TTL_SECONDS) {
+        attempt.spentAt = now;
+        s.usedCodeHashes[codeHash] = now;
+        this.record(s, now, attempt.proposalHash, false, 'attempt_expired');
+        return { expired: true };
+      }
+      s.usedCodeHashes[codeHash] = now;
+      attempt.spentAt = now;
+      return { ok: true, attempt: { ...attempt } };
+    });
+    if (!('ok' in intake)) return intake;
+    const { attempt } = intake;
+    const config = this.config();
+
+    let idToken: string;
+    try {
+      idToken = (await exchangeCode({ discovery: this.discovery, config, code, codeVerifier: attempt.codeVerifier })).id_token;
+    } catch (error) {
+      if (!(error instanceof TokenExchangeError)) throw error;
+      const reason = error.kind === 'idp_unavailable' ? 'idp_unavailable' : error.oauthError === 'access_denied' ? 'access_denied' : 'token_exchange_failed';
+      await this.store.update((s) => this.record(s, this.now(), attempt.proposalHash, false, reason));
+      return { denied: true, reason };
+    }
+
+    let verified: VerifiedIdToken;
+    try {
+      verified = await verifyIdToken({
+        discovery: this.discovery,
+        idToken,
+        clientId: config.clientId,
+        expectedNonce: attempt.nonce,
+        requiredAcr: ACR_ORB_V3,
+        now: this.now,
+      });
+    } catch (error) {
+      if (!(error instanceof IdTokenError)) throw error;
+      const doneAt = this.now();
+      if (error.reason === 'token_expired') {
+        await this.store.update((s) => this.record(s, doneAt, attempt.proposalHash, false, 'token_expired'));
+        return { expired: true };
+      }
+      const reason = error.reason === 'jwks_unavailable' ? 'idp_unavailable' : error.reason;
+      await this.store.update((s) => this.record(s, doneAt, attempt.proposalHash, false, reason));
+      return { denied: true, reason };
+    }
+
+    if (verified.nonce !== attempt.nonce) {
+      const doneAt = this.now();
+      await this.store.update((s) => this.record(s, doneAt, attempt.proposalHash, false, 'nonce_mismatch'));
+      return { denied: true, reason: 'nonce_mismatch' };
+    }
+
+    const authTimeMs = verified.authTime * 1000;
+    const doneAt = this.now();
+    await this.store.update((s) => {
+      s.decisions[attempt.proposalHash] = {
+        proposalHash: attempt.proposalHash,
+        approved: true,
+        sub: verified.sub,
+        authTimeMs,
+        decidedAt: doneAt,
+      };
+      this.record(s, doneAt, attempt.proposalHash, true);
+    });
+    return { verified: true, sub: verified.sub, authTimeMs };
+  }
+
+  /**
+   * The pairwise `sub` itself is never written here, only to `StepUpDecisionRecord.sub`
+   * (set directly by the caller, keyed by proposal hash, before this runs) — the append-only
+   * log never carries it, matching the old store's "no client secret, no ID token, no
+   * access token" discipline one step further.
+   */
+  private record(s: StepUpState, at: number, proposalHash: Hash32 | undefined, approved: boolean, reason?: string): void {
+    if (!approved) {
+      s.log.push({ at, kind: 'denied', ...(proposalHash !== undefined ? { proposalHash } : {}), ...(reason !== undefined ? { reason } : {}) });
+      if (proposalHash !== undefined) {
+        s.decisions[proposalHash] = { proposalHash, approved: false, ...(reason !== undefined ? { reason } : {}), decidedAt: at };
+      }
+    } else {
+      s.log.push({ at, kind: 'approved', ...(proposalHash !== undefined ? { proposalHash } : {}) });
+    }
+  }
+}
+
+// ─── Default-singleton module functions, matching PRD D.6's literal sketch ─
+
+let defaultFlow: Promise<WorldStepUpFlow> | undefined;
+
+function getDefaultFlow(): Promise<WorldStepUpFlow> {
+  if (!defaultFlow) defaultFlow = WorldStepUpFlow.create();
+  return defaultFlow;
+}
+
+/**
+ * `initiateStepUp(req): Promise<{ authUrl, state }>` exactly as PRD D.6 sketches it.
+ * Builds the real authorize URL with state, nonce, PKCE S256, scope `openid`, reading
+ * `WORLD_SANDBOX_CLIENT_ID` and `WORLD_REDIRECT_URI` from the environment at call time —
+ * missing values throw a `WorldConfigError` naming exactly which ones. Uses a lazily
+ * created, module-level `WorldStepUpFlow` (live discovery + the default JSON-file store);
+ * construct a `WorldStepUpFlow` directly instead when a test needs to inject a store,
+ * discovery document, or clock.
+ */
+export async function initiateStepUp(req: WorldStepUpRequest): Promise<InitiateStepUpResult> {
+  const flow = await getDefaultFlow();
+  return flow.initiateStepUp(req);
+}
+
+/**
+ * `handleCallback(code, state): Promise<{verified:true,...} | {denied:true,...} | {expired:true}>`
+ * exactly as PRD D.6 sketches it (task's exact shape, with `authTimeMs` added to the
+ * verified case for `stepup-gate.ts`'s freshness check). Exchanges the code, verifies the
+ * id_token against the real live JWKS (iss, aud, exp, nonce, alg RS256), reading
+ * `WORLD_SANDBOX_CLIENT_SECRET` at call time. Server-side only.
+ */
+export async function handleCallback(code: string, state: string): Promise<HandleCallbackResult> {
+  const flow = await getDefaultFlow();
+  return flow.handleCallback(code, state);
 }

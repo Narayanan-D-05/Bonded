@@ -1,109 +1,96 @@
 /**
- * Storage for owner bindings, pending authorization attempts, and replay ledgers.
+ * Storage for pending step-up attempts and replay ledgers, keyed by proposal instead of
+ * by agent.
  *
- * Behind an interface so `web/` (the Recovery Desk route) and `agents/` (checking
- * whether an agent may open a bond) share one source of truth. The default
- * implementation is a small JSON file at `<workspace>/.data/identity/identity-store.json`.
- * `.data/` is gitignored (.gitignore line 50), so the file is never committed.
+ * Adapted from the now-deleted `identity/src/store.ts` (the Hostage Protocol's Recovery
+ * Desk, which keyed everything by `agentName` because it gated an agent-wide lock state).
+ * Migration PRD D.6 gates a specific irreversible *proposal* instead — "the fresh World
+ * check gates only the moment a proposal crosses `irreversibleAboveUSDC` or is flagged
+ * non-refundable" — so every record here is keyed by `proposalHash`, not an agent name,
+ * and there is no `AgentIdentityRecord`/`LOCKED` concept: a proposal either gets a fresh
+ * approval or it doesn't, and nothing here persists across proposals.
  *
- * What the file holds and why that is acceptable:
- *  - pairwise `sub` per bound agent. It is meaningless outside this relying party's sector.
- *  - pending attempts' PKCE verifiers. Each is short-lived and useless without a matching
- *    code. Attempts are pruned after a day.
+ * What the file holds and why that is acceptable (same reasoning as the original):
+ *  - pending attempts' PKCE verifiers, one per `state`. Each is short-lived and useless
+ *    without a matching authorization code. Attempts are pruned after a day.
  *  - SHA-256 hashes of redeemed authorization codes, never the codes themselves.
+ *  - the pairwise `sub` and `auth_time` of a *decided* step-up, per proposal hash — kept so
+ *    `settle_with_stepup`'s off-chain caller and `/api/stepup` can both look up the same
+ *    decision idempotently instead of re-deciding on every poll.
  *  - no client secret, no ID token, no access token.
  */
 
 import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
+import type { Hash32 } from '@bonded/seam';
 
-export type AgentStatus = 'ACTIVE' | 'LOCKED';
-
-export interface OwnerBinding {
-  issuer: string;
-  /** Pairwise subject of the human who created this agent. */
-  sub: string;
-  /** Unix seconds (our clock) when the binding was written. */
-  boundAt: number;
-  /** Unix seconds (IdP's `auth_time`) of the verification that created the binding. */
-  authTime: number;
-}
-
-export interface ScarRecord {
-  /** Sui object id of the slashed bond. */
-  bondId: string;
-  /** Sui transaction digest of the slash. */
-  slashTxDigest: string;
-  /** Hash of the evidence attached to the slash (PRD C.4, CLAUDE.md rule 5). */
-  evidenceHash: string;
-  at: number;
-}
-
-export interface AgentIdentityRecord {
-  agentName: string;
-  owner: OwnerBinding;
-  status: AgentStatus;
-  scars: ScarRecord[];
-  lockedSince?: number;
-  lastRecovery?: { at: number; authTime: number };
-}
-
-export type AttemptPurpose = 'bind' | 'recover';
-
-export interface AuthorizationAttempt {
+export interface StepUpAttempt {
   state: string;
   nonce: string;
   codeVerifier: string;
-  purpose: AttemptPurpose;
-  agentName: string;
+  proposalHash: Hash32;
+  /** Shown to the human at authorization time (Migration PRD D.6's `reason`). */
+  reason: string;
   /** Unix seconds (our clock). `auth_time` must not predate this (max_age=0). */
   createdAt: number;
   /** Set when a callback for this attempt was taken; the state/nonce pair is single-use. */
   spentAt?: number;
-  /** Set when a verified token was concluded against this attempt. */
+  /** Set when a verified token was concluded against this attempt (approved or denied). */
   concludedAt?: number;
 }
 
-export type DeskEventKind = 'bound' | 'scarred' | 'recovery_started' | 'recovered' | 'denied';
+/** A decided step-up, keyed by the proposal it gates. Overwritten by a later attempt. */
+export interface StepUpDecisionRecord {
+  proposalHash: Hash32;
+  approved: boolean;
+  reason?: string;
+  sub?: string;
+  authTimeMs?: number;
+  decidedAt: number;
+}
 
-export interface DeskEvent {
+export type StepUpEventKind = 'started' | 'approved' | 'denied';
+
+export interface StepUpEvent {
   at: number;
-  kind: DeskEventKind;
-  agentName?: string;
-  purpose?: AttemptPurpose;
+  kind: StepUpEventKind;
+  proposalHash?: Hash32;
   reason?: string;
   detail?: string;
 }
 
-export interface IdentityState {
+export interface StepUpState {
   version: 1;
-  agents: Record<string, AgentIdentityRecord>;
-  attempts: Record<string, AuthorizationAttempt>;
+  /** Keyed by `state` (the OAuth state parameter), not by proposal — one proposal may be
+   *  retried across several attempts if an earlier one expired or was denied. */
+  attempts: Record<string, StepUpAttempt>;
   /** sha256(code) -> unix seconds first seen. */
   usedCodeHashes: Record<string, number>;
   /** nonce -> unix seconds concluded. */
   concludedNonces: Record<string, number>;
-  log: DeskEvent[];
+  /** proposalHash -> most recent decision. */
+  decisions: Record<string, StepUpDecisionRecord>;
+  log: StepUpEvent[];
 }
 
-export function emptyIdentityState(): IdentityState {
-  return { version: 1, agents: {}, attempts: {}, usedCodeHashes: {}, concludedNonces: {}, log: [] };
+export function emptyStepUpState(): StepUpState {
+  return { version: 1, attempts: {}, usedCodeHashes: {}, concludedNonces: {}, decisions: {}, log: [] };
 }
 
-export interface IdentityStore {
-  read(): Promise<IdentityState>;
+export interface StepUpStore {
+  read(): Promise<StepUpState>;
   /**
    * Atomic read-modify-write. `fn` mutates the state it is given and returns a value.
-   * Concurrent updates are serialised, so two callbacks carrying the same code
-   * cannot both pass the replay check.
+   * Concurrent updates are serialised, so two callbacks carrying the same code cannot
+   * both pass the replay check.
    */
-  update<T>(fn: (state: IdentityState) => T): Promise<T>;
+  update<T>(fn: (state: StepUpState) => T): Promise<T>;
 }
 
 const RETENTION_SECONDS = 24 * 60 * 60;
 const LOG_CAP = 500;
 
-function prune(state: IdentityState, nowSec: number): void {
+function prune(state: StepUpState, nowSec: number): void {
   for (const [k, a] of Object.entries(state.attempts)) {
     if (nowSec - a.createdAt > RETENTION_SECONDS) delete state.attempts[k];
   }
@@ -116,16 +103,16 @@ function prune(state: IdentityState, nowSec: number): void {
   if (state.log.length > LOG_CAP) state.log.splice(0, state.log.length - LOG_CAP);
 }
 
-/** In-process store. Used by unit tests of the desk's own logic. */
-export class MemoryIdentityStore implements IdentityStore {
-  private state: IdentityState = emptyIdentityState();
+/** In-process store. Used by unit tests of the flow's own logic — never a real token. */
+export class MemoryStepUpStore implements StepUpStore {
+  private state: StepUpState = emptyStepUpState();
   private chain: Promise<unknown> = Promise.resolve();
 
-  async read(): Promise<IdentityState> {
+  async read(): Promise<StepUpState> {
     return structuredClone(this.state);
   }
 
-  update<T>(fn: (state: IdentityState) => T): Promise<T> {
+  update<T>(fn: (state: StepUpState) => T): Promise<T> {
     const run = this.chain.then(() => {
       const next = structuredClone(this.state);
       const out = fn(next);
@@ -137,17 +124,17 @@ export class MemoryIdentityStore implements IdentityStore {
   }
 }
 
-export class IdentityStoreError extends Error {
+export class StepUpStoreError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'IdentityStoreError';
+    this.name = 'StepUpStoreError';
   }
 }
 
 /**
  * Find the workspace root (the directory holding pnpm-workspace.yaml), walking up from
- * `from`. `web/` and `agents/` run from different working directories and must resolve
- * the same file.
+ * `from`. Console, agent and script callers run from different working directories and
+ * must resolve the same file.
  */
 export function findWorkspaceRoot(from: string = process.cwd()): string {
   let dir = path.resolve(from);
@@ -155,19 +142,19 @@ export function findWorkspaceRoot(from: string = process.cwd()): string {
     if (existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) {
-      throw new IdentityStoreError(
-        `Could not find the workspace root (pnpm-workspace.yaml) above ${from}. Set BONDED_IDENTITY_STORE to an explicit path.`,
+      throw new StepUpStoreError(
+        `Could not find the workspace root (pnpm-workspace.yaml) above ${from}. Set BONDED_STEPUP_STORE to an explicit path.`,
       );
     }
     dir = parent;
   }
 }
 
-/** `BONDED_IDENTITY_STORE` if set, else `<workspace>/.data/identity/identity-store.json`. */
-export function defaultIdentityStorePath(env: NodeJS.ProcessEnv = process.env, from?: string): string {
-  const override = env['BONDED_IDENTITY_STORE']?.trim();
+/** `BONDED_STEPUP_STORE` if set, else `<workspace>/.data/world-agents/stepup-store.json`. */
+export function defaultStepUpStorePath(env: NodeJS.ProcessEnv = process.env, from?: string): string {
+  const override = env['BONDED_STEPUP_STORE']?.trim();
   if (override) return path.resolve(override);
-  return path.join(findWorkspaceRoot(from), '.data', 'identity', 'identity-store.json');
+  return path.join(findWorkspaceRoot(from), '.data', 'world-agents', 'stepup-store.json');
 }
 
 const LOCK_STALE_MS = 10_000;
@@ -180,39 +167,41 @@ function delay(ms: number): Promise<void> {
 /**
  * JSON-file store. Cross-process safety comes from an exclusive lock file
  * (`<file>.lock`, created with O_EXCL) around each read-modify-write, and writes go
- * through a temp file plus rename. A corrupt file throws. It is never silently reset,
- * because resetting would unlock every scarred agent.
+ * through a temp file plus rename. A corrupt file throws; it is never silently reset,
+ * because resetting would erase the replay ledger that makes a code single-use.
+ *
+ * `.data/` is gitignored (.gitignore line 50), so this file is never committed.
  */
-export class JsonFileIdentityStore implements IdentityStore {
+export class JsonFileStepUpStore implements StepUpStore {
   private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
-    readonly filePath: string = defaultIdentityStorePath(),
+    readonly filePath: string = defaultStepUpStorePath(),
     private readonly nowSec: () => number = () => Math.floor(Date.now() / 1000),
   ) {}
 
-  private async load(): Promise<IdentityState> {
+  private async load(): Promise<StepUpState> {
     let text: string;
     try {
       text = await fs.readFile(this.filePath, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyIdentityState();
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyStepUpState();
       throw error;
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new IdentityStoreError(`Identity store ${this.filePath} is not valid JSON; refusing to overwrite it.`);
+      throw new StepUpStoreError(`Step-up store ${this.filePath} is not valid JSON; refusing to overwrite it.`);
     }
-    const s = parsed as Partial<IdentityState>;
-    if (s.version !== 1 || typeof s.agents !== 'object' || typeof s.attempts !== 'object') {
-      throw new IdentityStoreError(`Identity store ${this.filePath} has an unrecognised shape; refusing to overwrite it.`);
+    const s = parsed as Partial<StepUpState>;
+    if (s.version !== 1 || typeof s.attempts !== 'object' || typeof s.decisions !== 'object') {
+      throw new StepUpStoreError(`Step-up store ${this.filePath} has an unrecognised shape; refusing to overwrite it.`);
     }
     return {
-      ...emptyIdentityState(),
+      ...emptyStepUpState(),
       ...s,
-    } as IdentityState;
+    } as StepUpState;
   }
 
   private async acquireLock(): Promise<() => Promise<void>> {
@@ -239,14 +228,14 @@ export class JsonFileIdentityStore implements IdentityStore {
           continue;
         }
         if (Date.now() - started > LOCK_WAIT_MS) {
-          throw new IdentityStoreError(`Timed out waiting for lock ${lockPath}`);
+          throw new StepUpStoreError(`Timed out waiting for lock ${lockPath}`);
         }
         await delay(25);
       }
     }
   }
 
-  private async writeAtomic(state: IdentityState): Promise<void> {
+  private async writeAtomic(state: StepUpState): Promise<void> {
     const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(state, null, 2), 'utf8');
     for (let attempt = 0; ; attempt += 1) {
@@ -266,11 +255,11 @@ export class JsonFileIdentityStore implements IdentityStore {
     }
   }
 
-  async read(): Promise<IdentityState> {
+  async read(): Promise<StepUpState> {
     return this.load();
   }
 
-  update<T>(fn: (state: IdentityState) => T): Promise<T> {
+  update<T>(fn: (state: StepUpState) => T): Promise<T> {
     const run = this.chain.then(async () => {
       const release = await this.acquireLock();
       try {
