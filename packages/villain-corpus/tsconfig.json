@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./harness",
+    "isolatedModules": true
+  },
+  "include": ["harness"],
+  "exclude": ["harness/__tests__"]
+}
