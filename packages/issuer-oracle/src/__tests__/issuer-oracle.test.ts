@@ -180,6 +180,27 @@ describe('fetchVendorTruth', () => {
   it('returns null for an unknown vendor id', async () => {
     await expect(fetchVendorTruth('vnd-does-not-exist')).resolves.toBeNull();
   });
+
+  it('returns the seeded large-invoice vendor (vnd-halcyon-machining): active, old payout address, $15,000.00', async () => {
+    const truth = await fetchVendorTruth('vnd-halcyon-machining');
+    expect(truth).toEqual({
+      vendorId: 'vnd-halcyon-machining',
+      legalName: 'Halcyon Precision Machining Co.',
+      payoutAddress: '0x37bd5261f170c24c66550dc7c086fcd3c2c29ec5ae2f5fc587acd3ee7d642289',
+      invoiceAmountUSD: '15000000000',
+      status: 'active',
+      payoutAddressLastChangedAt: 1743465600,
+      evmAddress: '0xbae3858539c96526d2bd0a89c95a6c98caeb683a',
+    });
+  });
+
+  it('every synthetic evmAddress is the documented sha256 derivation', async () => {
+    const { createHash } = await import('node:crypto');
+    for (const id of ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp', 'vnd-halcyon-machining']) {
+      const derived = `0x${createHash('sha256').update(`bonded-synthetic-evm-identity:${id}`, 'utf8').digest('hex').slice(0, 40)}`;
+      expect((await fetchVendorTruth(id))?.evmAddress).toBe(derived);
+    }
+  });
 });
 
 describe('issuerOracleVendors.fields — resolvePremise adapter convention', () => {

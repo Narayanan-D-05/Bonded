@@ -7,7 +7,7 @@
  * re-derived from the vendor-master source, never taken from the invoice
  * (see recipient.ts).
  */
-export { settleCleared, settleWithStepUp, commitPolicy, readPolicyHash } from './settle.js';
+export { settleCleared, settleWithStepUp, commitPolicy, readPolicyHash, readVaultSpent } from './settle.js';
 export type {
   SettlementResult,
   CommitPolicyResult,

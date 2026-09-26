@@ -15,6 +15,7 @@ import { ReasonCode } from '@bonded/seam';
 import type { LogRefInput } from '@bonded/enforcer';
 import { issuerOracleVendors } from '@bonded/issuer-oracle';
 import {
+  bindClaimArgs,
   canonicalHash,
   computeLogRef,
   createResolvePremise,
@@ -296,5 +297,54 @@ describe('failClosedTable', () => {
     const registry: SchemaRegistry = { raw: { fields: { 'f.boom': async () => { throw new Error('raw'); } } } };
     const resolvePremise = createResolvePremise(registry);
     await expect(resolvePremise(makePremise({ schema: 'raw', field: 'f.boom' }), CHECKPOINT)).rejects.toThrow('raw');
+  });
+});
+
+describe('bindClaimArgs', () => {
+  const recorded: string[][] = [];
+  const table: SchemaRegistry = {
+    'test-schema': {
+      fields: {
+        'test.field': async (...args: string[]) => {
+          recorded.push(args);
+          return args.join('|');
+        },
+      },
+    },
+  };
+  const proposal = {
+    premises: [
+      { premiseId: 'p-identity', claimedValue: '0xabc' },
+      { premiseId: 'p-dup', claimedValue: 'a' },
+      { premiseId: 'p-dup', claimedValue: 'b' },
+    ],
+  };
+  beforeEach(() => {
+    recorded.length = 0;
+  });
+
+  it("replaces claim:<id> with that premise's claimed value, leaving plain args in place", async () => {
+    const resolve = bindClaimArgs(createResolvePremise(table), proposal);
+    await expect(resolve(makePremise({ args: ['fixed', 'claim:p-identity'] }), CHECKPOINT)).resolves.toBe('fixed|0xabc');
+    expect(recorded).toEqual([['fixed', '0xabc']]);
+  });
+
+  it('passes a premise with no claim args through unchanged', async () => {
+    const resolve = bindClaimArgs(createResolvePremise(table), proposal);
+    await expect(resolve(makePremise({ args: ['x'] }), CHECKPOINT)).resolves.toBe('x');
+    await expect(resolve(makePremise(), CHECKPOINT)).resolves.toBe('');
+  });
+
+  it('fails closed (null, adapter never called) when the named claim is missing or ambiguous', async () => {
+    const resolve = bindClaimArgs(createResolvePremise(table), proposal);
+    await expect(resolve(makePremise({ args: ['claim:p-missing'] }), CHECKPOINT)).resolves.toBeNull();
+    await expect(resolve(makePremise({ args: ['claim:p-dup'] }), CHECKPOINT)).resolves.toBeNull();
+    expect(recorded).toEqual([]);
+  });
+
+  it('does not mutate the policy premise it was given', async () => {
+    const def = makePremise({ args: ['claim:p-identity'] });
+    await bindClaimArgs(createResolvePremise(table), proposal)(def, CHECKPOINT);
+    expect(def.args).toEqual(['claim:p-identity']);
   });
 });

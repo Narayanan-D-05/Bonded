@@ -19,6 +19,11 @@
  * neither package exports it.
  *
  * Run: pnpm --filter @bonded/sui-settlement live:testnet   (with the SUI_* ids in env)
+ *
+ * WARNING (2026-09-26): the console now commits ONE AP-agent policy for this same agent
+ * (apps/console/lib/ap-policy.ts, `pnpm --filter @bonded/console commit:policy`). Running this
+ * script re-commits the acme-only hash over it, and every console invoice then fails STALE_POLICY
+ * until `commit:policy` is run again. See move/DEPLOYMENTS.md.
  */
 
 import type { Address, Hash32, PolicyArtifact, Proposal } from '@bonded/seam';

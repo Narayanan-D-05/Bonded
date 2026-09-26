@@ -11,14 +11,14 @@
  *     If any are missing, it exits 1 naming them.
  *  3. Refuses to write anywhere but a Demo Company (`Organisation.IsDemoCompany`)
  *     whose BaseCurrency is USD.
- *  4. Creates or updates the three seeded suppliers from `vendor-fixture.ts`
+ *  4. Creates or updates the four seeded suppliers from `vendor-fixture.ts`
  *     (ContactNumber = vendor id, Name = legalName, BankAccountDetails =
  *     `bonded:v1;sui=<payoutAddress>;evm=<evmAddress>`), gives each an
  *     AUTHORISED USD ACCPAY bill for its invoice amount, and archives
  *     `vnd-suspended-corp` (ARCHIVED maps to 'suspended'). It only writes
  *     what differs, so re-running is safe. Note that the Demo Company resets
  *     itself 28 days after creation, so re-run this script after a reset.
- *  5. Reads all three back through the SAME `createXeroVendorSource` the
+ *  5. Reads all four back through the SAME `createXeroVendorSource` the
  *     enforcer would use, and exits 1 on any mismatch with the fixture.
  *
  * Every endpoint/field used is cited in `src/sources/xero.ts`'s header.
@@ -43,7 +43,9 @@ import {
 import { fetchVendorTruth, type VendorTruth } from '../src/vendor-fixture.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const VENDOR_IDS = ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp'] as const;
+// vnd-halcyon-machining (the $15,000 over-the-irreversible-threshold bill) was added with the
+// console's one-policy-per-agent restructure; re-run this script to seed it into an existing org.
+const VENDOR_IDS = ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp', 'vnd-halcyon-machining'] as const;
 
 const PORTAL_STEPS = `
 Xero one-time setup (Custom Connection + Demo Company, free for development)

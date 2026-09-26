@@ -96,6 +96,13 @@ export interface VendorTruth {
  *  - `vnd-suspended-corp` — `status: 'suspended'`. The hard-refuse case: any
  *    invoice claim against a suspended vendor should resolve to a refusal
  *    regardless of what address or amount is claimed.
+ *  - `vnd-halcyon-machining` — clean, but a $15,000.00 bill: the
+ *    over-the-irreversible-threshold case (see its record below).
+ *
+ * `TRUTH` itself is never mutated. A World-approved bank change is recorded
+ * in an append-only change log and overlaid on top of this map by
+ * `vendor-master-changes.ts` (opt-in; `fetchVendorTruth` below stays the
+ * pure seeded record).
  */
 const TRUTH: Record<string, VendorTruth> = {
   'vnd-acme-supplies': {
@@ -128,6 +135,29 @@ const TRUTH: Record<string, VendorTruth> = {
     status: 'suspended',
     payoutAddressLastChangedAt: 1748736000, // 2025-06-01T00:00:00Z — arbitrary, not load-bearing
     evmAddress: '0x3dedb65cd8aed5a70842a9c7ca3dff4a6f83f39f', // synthetic — see VendorTruth.evmAddress
+  },
+  /**
+   * `vnd-halcyon-machining` — the large-invoice case. Clean on every
+   * vendor-master fact (active, old payout address, correct amount), but its
+   * $15,000.00 open bill is above the console AP policy's
+   * `irreversibleAboveUSDC`, so a correct claim still holds for a World
+   * step-up (IRREVERSIBLE_UNCONFIRMED) instead of clearing autonomously.
+   *
+   * Synthetic, like the rest of this fixture:
+   *  - `payoutAddress` is the full sha256("bonded-synthetic-sui-payout:vnd-halcyon-machining").
+   *  - `evmAddress` is the first 20 bytes of
+   *    sha256("bonded-synthetic-evm-identity:vnd-halcyon-machining"), the same
+   *    derivation as the three vendors above, and was checked absent from the
+   *    OFAC SDN list (sdn.csv, fetched 2026-09-26, publication dated 2026-09-22).
+   */
+  'vnd-halcyon-machining': {
+    vendorId: 'vnd-halcyon-machining',
+    legalName: 'Halcyon Precision Machining Co.',
+    payoutAddress: '0x37bd5261f170c24c66550dc7c086fcd3c2c29ec5ae2f5fc587acd3ee7d642289',
+    invoiceAmountUSD: '15000000000', // $15,000.00
+    status: 'active',
+    payoutAddressLastChangedAt: 1743465600, // 2025-04-01T00:00:00Z — long before this fixture's baseline; no recent bank change
+    evmAddress: '0xbae3858539c96526d2bd0a89c95a6c98caeb683a', // synthetic — see above
   },
 };
 

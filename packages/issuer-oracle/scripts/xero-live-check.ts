@@ -22,7 +22,7 @@ import { XeroConfigError } from '../src/sources/xero.js';
 import { fetchVendorTruth } from '../src/vendor-fixture.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const VENDOR_IDS = ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp'] as const;
+const VENDOR_IDS = ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp', 'vnd-halcyon-machining'] as const;
 
 async function main(): Promise<void> {
   const envPath = join(REPO_ROOT, '.env');

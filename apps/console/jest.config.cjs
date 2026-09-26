@@ -5,8 +5,11 @@
 // dev server, not jest, per the task's own verification instructions.
 module.exports = {
   extensionsToTreatAsEsm: ['.ts'],
+  // RegExp source with properly escaped dots (same fix as packages/sui-settlement/jest.config.cjs):
+  // the plain-string form collapses `\.` to `.`, which also matched @mysten/sui's internal `.mjs`
+  // imports once this app started depending on @bonded/sui-settlement.
   moduleNameMapper: {
-    '^(\.{1,2}/.*)\.js$': '$1',
+    [/^(\.{1,2}\/.*)\.js$/.source]: '$1',
   },
   transform: {
     '^.+\.ts$': ['ts-jest', { useESM: true }],

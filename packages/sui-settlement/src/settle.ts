@@ -21,6 +21,7 @@ import {
   explorerTxUrl,
   gasSummary,
   readPolicyHash as readPolicyHashWithConfig,
+  readVaultSpentThisPeriod as readVaultSpentWithConfig,
   registryAgentKey,
   type GasSummary,
   type SettledEvent,
@@ -162,4 +163,13 @@ export async function commitPolicy(agentAddress: string, policyHash: Hash32, opt
 /** `BondedRegistry.current_policy_hash[agent]`, read through gRPC simulate. `null` if never committed. */
 export async function readPolicyHash(agentAddress: string, options?: SettleOptions): Promise<Hash32 | null> {
   return readPolicyHashWithConfig(agentAddress, config(options));
+}
+
+/**
+ * `Vault<T>.spent_this_period`, read through gRPC simulate. A vault-wide,
+ * never-reset running total of payouts (see chain.ts). The console uses it
+ * as `enforce()`'s `sumRecentSpend`.
+ */
+export async function readVaultSpent(options?: SettleOptions): Promise<bigint> {
+  return readVaultSpentWithConfig(config(options));
 }

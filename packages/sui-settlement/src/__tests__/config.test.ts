@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { loadSettlementConfig, SettlementConfigError, SETTLEMENT_ENV } from '../config.js';
-import { settleCleared, commitPolicy } from '../settle.js';
+import { settleCleared, commitPolicy, readPolicyHash, readVaultSpent } from '../settle.js';
 import { deriveVendorRecipient } from '../recipient.js';
 import { clearedVerdict, POLICY_HASH, REAL_ENV } from './fixtures.js';
 
@@ -51,5 +51,12 @@ describe('loadSettlementConfig', () => {
     const env: Record<string, string | undefined> = { ...REAL_ENV };
     delete env.SUI_ENFORCER_CAP_ID;
     await expect(commitPolicy(`0x${'aa'.repeat(20)}`, POLICY_HASH, { env })).rejects.toThrow(/^SUI_ENFORCER_CAP_ID is not set/);
+  });
+
+  it('readVaultSpent and readPolicyHash fail on missing config before any network call, naming the variable', async () => {
+    const env: Record<string, string | undefined> = { ...REAL_ENV };
+    delete env.SUI_VAULT_ID;
+    await expect(readVaultSpent({ env })).rejects.toThrow(/^SUI_VAULT_ID is not set/);
+    await expect(readPolicyHash(`0x${'aa'.repeat(20)}`, { env })).rejects.toThrow(/^SUI_VAULT_ID is not set/);
   });
 });
