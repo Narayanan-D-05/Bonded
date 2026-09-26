@@ -1,0 +1,214 @@
+{
+  "generatedAt": "2026-09-26T06:40:40.077Z",
+  "coreScenarios": [
+    {
+      "name": "core-1-globex-fraudulent-payout-address",
+      "vendorId": "vnd-globex-freight",
+      "proposal": {
+        "id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "agent": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "action": {
+          "kind": "transfer",
+          "target": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "calldata": "0x",
+          "valueUSDC": "8450000000"
+        },
+        "premises": [
+          {
+            "premiseId": "p-vendor-payout",
+            "claimedValue": "0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187"
+          }
+        ],
+        "createdAt": 1790200000
+      },
+      "policy": {
+        "version": 1,
+        "budget": {
+          "asset": "USDC",
+          "period": "daily",
+          "max": "100000000000"
+        },
+        "premises": [
+          {
+            "id": "p-vendor-payout",
+            "schema": "issuer-oracle-vendors",
+            "field": "vendor.payoutAddress",
+            "op": "eq",
+            "value": "0xcbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e",
+            "args": [
+              "vnd-globex-freight"
+            ],
+            "holdOnMismatch": true
+          }
+        ],
+        "forbid": [],
+        "irreversibleAboveUSDC": "50000000000"
+      },
+      "expected": {
+        "outcome": 2,
+        "reasonCode": 7,
+        "reasonCodeName": "PREMISE_HELD_FOR_REVIEW"
+      },
+      "actual": {
+        "outcome": 2,
+        "reasonCode": 7,
+        "reasonCodeName": "PREMISE_HELD_FOR_REVIEW",
+        "proposalHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "policyHash": "0xf418065355881ee8746fe7ae1149ed2289dc1d6411b55a7820dbea401ce14a6c",
+        "blockChecked": "4200",
+        "logRef": "0x39d9c887384739c087282c04e1ada35463c689e2ce608f6a158dde16e0fca2a1"
+      },
+      "pass": true
+    },
+    {
+      "name": "core-2-suspended-corp-status-mismatch",
+      "vendorId": "vnd-suspended-corp",
+      "proposal": {
+        "id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "agent": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "action": {
+          "kind": "transfer",
+          "target": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "calldata": "0x",
+          "valueUSDC": "4200000000"
+        },
+        "premises": [
+          {
+            "premiseId": "p-vendor-status",
+            "claimedValue": "active"
+          }
+        ],
+        "createdAt": 1790200100
+      },
+      "policy": {
+        "version": 1,
+        "budget": {
+          "asset": "USDC",
+          "period": "daily",
+          "max": "100000000000"
+        },
+        "premises": [
+          {
+            "id": "p-vendor-status",
+            "schema": "issuer-oracle-vendors",
+            "field": "vendor.status",
+            "op": "eq",
+            "value": "active",
+            "args": [
+              "vnd-suspended-corp"
+            ]
+          }
+        ],
+        "forbid": [],
+        "irreversibleAboveUSDC": "50000000000"
+      },
+      "expected": {
+        "outcome": 1,
+        "reasonCode": 1,
+        "reasonCodeName": "PREMISE_MISMATCH"
+      },
+      "actual": {
+        "outcome": 1,
+        "reasonCode": 1,
+        "reasonCodeName": "PREMISE_MISMATCH",
+        "proposalHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "policyHash": "0x21cd6cef140d18a100c5d7c980e290c327c4d1dc7f59e8fb926efb72842319d1",
+        "blockChecked": "4200",
+        "logRef": "0xaf44a17777dfd6f332172961d83180e330c38846b9196b2dc6a38404c32b75d3"
+      },
+      "pass": true
+    },
+    {
+      "name": "core-3-acme-supplies-correct-claim",
+      "vendorId": "vnd-acme-supplies",
+      "proposal": {
+        "id": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "agent": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "action": {
+          "kind": "transfer",
+          "target": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "calldata": "0x",
+          "valueUSDC": "1250000000"
+        },
+        "premises": [
+          {
+            "premiseId": "p-vendor-payout",
+            "claimedValue": "0x4d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0"
+          },
+          {
+            "premiseId": "p-vendor-status",
+            "claimedValue": "active"
+          }
+        ],
+        "createdAt": 1790200200
+      },
+      "policy": {
+        "version": 1,
+        "budget": {
+          "asset": "USDC",
+          "period": "daily",
+          "max": "100000000000"
+        },
+        "premises": [
+          {
+            "id": "p-vendor-payout",
+            "schema": "issuer-oracle-vendors",
+            "field": "vendor.payoutAddress",
+            "op": "eq",
+            "value": "0x4d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0",
+            "args": [
+              "vnd-acme-supplies"
+            ]
+          },
+          {
+            "id": "p-vendor-status",
+            "schema": "issuer-oracle-vendors",
+            "field": "vendor.status",
+            "op": "eq",
+            "value": "active",
+            "args": [
+              "vnd-acme-supplies"
+            ]
+          }
+        ],
+        "forbid": [],
+        "irreversibleAboveUSDC": "50000000000"
+      },
+      "expected": {
+        "outcome": 0,
+        "reasonCode": 0,
+        "reasonCodeName": "OK"
+      },
+      "actual": {
+        "outcome": 0,
+        "reasonCode": 0,
+        "reasonCodeName": "OK",
+        "proposalHash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "policyHash": "0xf372ffa84e65a92ffddc618578509d9d56ad7d23b7385614d45d36aa6df10eea",
+        "blockChecked": "4200",
+        "logRef": "0xfb5540486be2b6e67da4cb24eb6d5159607a8b927856797ac330941fe985aec4"
+      },
+      "pass": true
+    }
+  ],
+  "mismatchLog": [
+    {
+      "proposalId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "premiseId": "p-vendor-payout",
+      "claimedValue": "0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187",
+      "derivedValue": "0xcbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e"
+    },
+    {
+      "proposalId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "premiseId": "p-vendor-status",
+      "claimedValue": "active",
+      "derivedValue": "suspended"
+    }
+  ],
+  "optionalInterceptaScenario": {
+    "status": "skipped_no_key",
+    "reason": "INTERCEPTA_API_KEY is not set — the optional live Intercepta screen of the fraudulent payout address was NOT run. This is a visible skip, not a silent one (CLAUDE.md rule 7): no fake or mocked Intercepta result is substituted.",
+    "screenedAddress": "0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187"
+  },
+  "allCorePassed": true
+}
