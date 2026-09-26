@@ -1,0 +1,42 @@
+{
+  "name": "@bonded/sui-settlement",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Submits the real Sui settlement for an enforce() verdict: mint_verdict + settle (CLEARED) or mint_verdict + mint_stepup_approval + settle_with_stepup (HELD, World-approved), plus BondedRegistry commit_policy/current_policy_hash. Signs by shelling out to the Sui CLI keystore (CLAUDE.md rule 3) — TypeScript never reads key bytes. Every result is read back on-chain over gRPC before it is reported.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs",
+    "live:testnet": "tsx scripts/live-testnet.ts"
+  },
+  "dependencies": {
+    "@bonded/issuer-oracle": "workspace:*",
+    "@bonded/seam": "workspace:*",
+    "@bonded/world-agents": "workspace:*",
+    "@mysten/sui": "2.33.1"
+  },
+  "devDependencies": {
+    "@bonded/dispatcher": "workspace:*",
+    "@bonded/enforcer": "workspace:*",
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}
