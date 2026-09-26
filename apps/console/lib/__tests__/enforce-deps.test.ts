@@ -14,6 +14,10 @@
  *      submitted.
  *    · World: `HandleCallbackResult` values stand in for "handleCallback already ran and returned
  *      this", the convention @bonded/world-agents' own gate tests use.
+ *    · IDKit (vendor side): the vendor-request store is a temp file. Where a test needs a verified
+ *      vendor request on file, it appends a TEST-ONLY record in OUR store format
+ *      (`testVendorRequest`), standing in for "World's verify endpoint already answered success and
+ *      submitVendorBankChange recorded it". No IDKit proof and no World response is constructed.
  *    · Intercepta: nothing stands in for it, anywhere. INTERCEPTA_API_KEY is removed for the whole
  *      file, so every screen premise under the real AP policy fails closed. To reach the HELD
  *      branches without a key, the step-up chain tests run under TEST_SCREEN_FREE_POLICY: the AP
@@ -42,6 +46,7 @@ import { AP_AGENT_ADDRESS, AP_AGENT_POLICY } from '../ap-policy.js';
 import {
   DEMO_INVOICE_IDS,
   GLOBEX_NEW_BANK_PAYOUT_ADDRESS,
+  HALCYON_NEW_BANK_PAYOUT_ADDRESS,
   OnchainPolicyError,
   buildDemoInvoice,
   findInvoiceIdByProposalHash,
@@ -58,6 +63,14 @@ import {
 } from '../enforce-deps.js';
 import { completeStepUp, proposePayment } from '../payment.js';
 import { SettlementLedger, isPreSubmissionFailure } from '../settlement-ledger.js';
+import { hashSignal } from '@worldcoin/idkit-core/hashing';
+import {
+  appendVerifiedVendorBankChangeRequest,
+  buildVendorBankChangeSignal,
+  fileVendorRequestStore,
+  readVendorBankChangeRequests,
+  type VerifiedVendorBankChangeRequest,
+} from '../vendor-bank-change.js';
 
 let savedKey: string | undefined;
 beforeAll(() => {
@@ -111,9 +124,41 @@ function fakeResult(input: SettleClearedInput): SettlementResult {
   };
 }
 
-function testContext(over: Partial<ChainPort> = {}, screenFreeTestPolicy = false): { ctx: ConsoleContext; rec: Recorder; logPath: string } {
+/**
+ * TEST-ONLY record in our own store format: what `submitVendorBankChange` appends after World's
+ * verify endpoint answered success. Nothing here came from World; the nullifier is a placeholder
+ * decimal ('1') and the signal hash is computed by the SDK's own `hashSignal` over our signal.
+ */
+function testVendorRequest(
+  vendorId: string,
+  newPayoutAddress: string,
+  newEvmAddress: string,
+  verifiedAtMs: number,
+): VerifiedVendorBankChangeRequest {
+  const signal = buildVendorBankChangeSignal({ vendorId, newPayoutAddress, newEvmAddress });
+  return {
+    vendorId,
+    newPayoutAddress,
+    newEvmAddress,
+    signal,
+    signalHash: hashSignal(signal),
+    action: 'vendor-bank-change',
+    environment: 'staging',
+    protocolVersion: '4.0',
+    credentialType: 'passport',
+    issuerSchemaId: 9303,
+    nullifier: '1',
+    verifiedAtMs,
+  };
+}
+
+function testContext(
+  over: Partial<ChainPort> = {},
+  screenFreeTestPolicy = false,
+): { ctx: ConsoleContext; rec: Recorder; logPath: string; requestsPath: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'bonded-console-'));
   const logPath = path.join(dir, 'vendor-master-changes.json');
+  const requestsPath = path.join(dir, 'vendor-bank-change-requests.json');
   const rec: Recorder = { cleared: [], stepup: [] };
   const chain: ChainPort = {
     readPolicyHash: async () => (screenFreeTestPolicy ? canonicalHash(TEST_SCREEN_FREE_POLICY) : COMMITTED_HASH),
@@ -133,9 +178,10 @@ function testContext(over: Partial<ChainPort> = {}, screenFreeTestPolicy = false
     vendorSource: createFixtureVendorSourceWithChanges(logPath),
     ledger: new SettlementLedger(path.join(dir, 'settlements.json')),
     writeBankChange: createVendorMasterBankChangeWriter({} as NodeJS.ProcessEnv, { changeLogPath: logPath }),
+    vendorRequests: fileVendorRequestStore(requestsPath),
     ...(screenFreeTestPolicy ? { buildInvoice: buildInvoiceUnderScreenFreeTestPolicy } : {}),
   };
-  return { ctx, rec, logPath };
+  return { ctx, rec, logPath, requestsPath };
 }
 
 describe('the ONE AP agent policy', () => {
@@ -177,10 +223,10 @@ describe('the ONE AP agent policy', () => {
 });
 
 describe('demo invoices', () => {
-  it('lists five invoices with distinct deterministic proposal ids, recoverable by hash', async () => {
+  it('lists six invoices with distinct deterministic proposal ids, recoverable by hash', async () => {
     const invoices = await listDemoInvoices(fetchVendorTruth);
     expect(invoices.map((i) => i.invoiceId)).toEqual([...DEMO_INVOICE_IDS]);
-    expect(new Set(invoices.map((i) => i.proposal.id)).size).toBe(5);
+    expect(new Set(invoices.map((i) => i.proposal.id)).size).toBe(6);
     for (const inv of invoices) {
       expect(inv.proposal.id).toBe(proposalIdFor(inv.invoiceId));
       expect(findInvoiceIdByProposalHash(inv.proposal.id.toUpperCase().replace('0X', '0x'))).toBe(inv.invoiceId);
@@ -209,6 +255,20 @@ describe('demo invoices', () => {
       `0x${createHash('sha256').update('bonded-synthetic-sui-payout:vnd-globex-freight:bank-change', 'utf8').digest('hex')}`,
     );
   });
+
+  it("the IDKit demo bank change claims halcyon's registered EVM identity, a new documented address, and stays under the threshold", async () => {
+    const inv = await buildDemoInvoice('inv-halcyon-bank-change', fetchVendorTruth);
+    const truth = (await fetchVendorTruth('vnd-halcyon-machining'))!;
+    expect(inv.claimedPayeeEvmAddress).toBe(truth.evmAddress);
+    expect(inv.claimedPayoutAddress).not.toBe(truth.payoutAddress);
+    expect(inv.proposal.premises.at(-1)).toEqual({ premiseId: 'p-halcyon-payout', claimedValue: HALCYON_NEW_BANK_PAYOUT_ADDRESS });
+    expect(inv.claimedInvoiceAmountUSD).toBe(inv.proposal.action.valueUSDC);
+    expect(BigInt(inv.proposal.action.valueUSDC)).toBe(6_300_000_000n);
+    const { createHash } = await import('node:crypto');
+    expect(HALCYON_NEW_BANK_PAYOUT_ADDRESS).toBe(
+      `0x${createHash('sha256').update('bonded-synthetic-sui-payout:vnd-halcyon-machining:bank-change', 'utf8').digest('hex')}`,
+    );
+  });
 });
 
 describe('runEnforceForInvoice: real enforce(), on-chain policy hash, no key', () => {
@@ -223,7 +283,7 @@ describe('runEnforceForInvoice: real enforce(), on-chain policy hash, no key', (
 
   it('both globex invoices and halcyon REFUSE fail-closed without a key, with the key error attached', async () => {
     const { ctx } = testContext();
-    for (const id of ['inv-globex-spoofed', 'inv-globex-bank-change', 'inv-halcyon-machining'] as const) {
+    for (const id of ['inv-globex-spoofed', 'inv-globex-bank-change', 'inv-halcyon-machining', 'inv-halcyon-bank-change'] as const) {
       const r = await runEnforceForInvoice(id, ctx);
       expect(r.verdict.outcome).toBe(1);
       expect(r.verdict.reasonCode).toBe(ReasonCode.PREMISE_UNRESOLVABLE);
@@ -334,7 +394,10 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
   const verified = (authTimeMs = NOW - 1_000) => ({ verified: true as const, sub: 'world-sub-test', authTimeMs });
 
   it('bank change: approval writes the claimed address to the vendor master, re-enforces to CLEARED, and settles to the UPDATED truth', async () => {
-    const { ctx, rec, logPath } = testContext({}, true);
+    const { ctx, rec, logPath, requestsPath } = testContext({}, true);
+    const globex = (await fetchVendorTruth('vnd-globex-freight'))!;
+    const vendorRequest = testVendorRequest('vnd-globex-freight', GLOBEX_NEW_BANK_PAYOUT_ADDRESS, globex.evmAddress, NOW - 60_000);
+    await appendVerifiedVendorBankChangeRequest(requestsPath, vendorRequest);
     const held = await runEnforceForInvoice('inv-globex-bank-change', ctx);
     expect(serializeVerdict(held.verdict)).toMatchObject({ outcomeLabel: 'HELD_FOR_STEPUP', reasonCodeLabel: 'PREMISE_HELD_FOR_REVIEW' });
     // Nothing is paid while held.
@@ -349,6 +412,7 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
       newPayoutAddress: GLOBEX_NEW_BANK_PAYOUT_ADDRESS,
       appliedTo: 'fixture-overlay',
     });
+    expect(out.vendorRequest).toEqual(vendorRequest);
     expect(out.reenforcedVerdict?.outcomeLabel).toBe('CLEARED');
     expect(out.settlement.status).toBe('settled');
 
@@ -380,11 +444,13 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
   });
 
   it('irreversible: approval settles halcyon through settleWithStepUp with a certified approval, to the on-file address, once', async () => {
-    const { ctx, rec, logPath } = testContext({}, true);
+    const { ctx, rec, logPath, requestsPath } = testContext({}, true);
     const held = await runEnforceForInvoice('inv-halcyon-machining', ctx);
     expect(held.verdict.reasonCode).toBe(ReasonCode.IRREVERSIBLE_UNCONFIRMED);
     const out = await completeStepUp(held.verdict.proposalHash, verified(), ctx, NOW);
-    expect(out).toMatchObject({ kind: 'approved', holdReason: 'IRREVERSIBLE_UNCONFIRMED', vendorMasterChange: null });
+    // Unaffected by the vendor-side gate: no vendor request is on file, and none is needed.
+    expect(await readVendorBankChangeRequests(requestsPath)).toHaveLength(0);
+    expect(out).toMatchObject({ kind: 'approved', holdReason: 'IRREVERSIBLE_UNCONFIRMED', vendorMasterChange: null, vendorRequest: null });
     expect(rec.stepup).toHaveLength(1);
     expect(rec.stepup[0]!.recipient.address).toBe((await fetchVendorTruth('vnd-halcyon-machining'))!.payoutAddress as Address);
     expect(rec.stepup[0]!.stepUpDecision.proposalHash).toBe(held.verdict.proposalHash);
@@ -395,6 +461,72 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
     const again = await completeStepUp(held.verdict.proposalHash, verified(), ctx, NOW);
     expect(again.kind === 'approved' && again.settlement).toMatchObject({ status: 'settled', alreadySettled: true });
     expect(rec.stepup).toHaveLength(1);
+  });
+
+  it('vendor-side gate: without an IDKit-verified vendor request the approval is denied no_verified_vendor_request; nothing written, nothing paid', async () => {
+    const { ctx, rec, logPath } = testContext({}, true);
+    const held = await runEnforceForInvoice('inv-halcyon-bank-change', ctx);
+    expect(serializeVerdict(held.verdict)).toMatchObject({ outcomeLabel: 'HELD_FOR_STEPUP', reasonCodeLabel: 'PREMISE_HELD_FOR_REVIEW' });
+    const out = await completeStepUp(held.verdict.proposalHash, verified(), ctx, NOW);
+    expect(out).toMatchObject({ kind: 'denied', reason: 'no_verified_vendor_request' });
+    expect(out.kind === 'denied' && out.detail).toMatch(/\/vendor\/bank-change/);
+    expect(await readVendorMasterChanges(logPath)).toHaveLength(0);
+    expect(rec.cleared.length + rec.stepup.length).toBe(0);
+    // Still held, still unpaid.
+    expect((await runEnforceForInvoice('inv-halcyon-bank-change', ctx)).verdict.outcome).toBe(2);
+  });
+
+  it('vendor-side gate: a request for another address, another EVM identity, another vendor, or from before the last change never matches', async () => {
+    const { ctx, rec, logPath, requestsPath } = testContext({}, true);
+    const halcyon = (await fetchVendorTruth('vnd-halcyon-machining'))!;
+    const globex = (await fetchVendorTruth('vnd-globex-freight'))!;
+    const otherPayout = `0x${'ab'.repeat(32)}`;
+    await appendVerifiedVendorBankChangeRequest(requestsPath, testVendorRequest('vnd-halcyon-machining', otherPayout, halcyon.evmAddress, NOW - 60_000));
+    await appendVerifiedVendorBankChangeRequest(requestsPath, testVendorRequest('vnd-halcyon-machining', HALCYON_NEW_BANK_PAYOUT_ADDRESS, globex.evmAddress, NOW - 60_000));
+    await appendVerifiedVendorBankChangeRequest(requestsPath, testVendorRequest('vnd-globex-freight', HALCYON_NEW_BANK_PAYOUT_ADDRESS, halcyon.evmAddress, NOW - 60_000));
+    // Verified at (not after) the moment halcyon's payout address on file last changed: about an older state of the record.
+    await appendVerifiedVendorBankChangeRequest(
+      requestsPath,
+      testVendorRequest('vnd-halcyon-machining', HALCYON_NEW_BANK_PAYOUT_ADDRESS, halcyon.evmAddress, halcyon.payoutAddressLastChangedAt * 1000),
+    );
+    const out = await completeStepUp(proposalIdFor('inv-halcyon-bank-change'), verified(), ctx, NOW);
+    expect(out).toMatchObject({ kind: 'denied', reason: 'no_verified_vendor_request' });
+    expect(out.kind === 'denied' && out.detail).toMatch(/none matches/);
+    expect(await readVendorMasterChanges(logPath)).toHaveLength(0);
+    expect(rec.cleared.length + rec.stepup.length).toBe(0);
+  });
+
+  it('vendor-side gate: a matching IDKit-verified request lets the approval update the vendor master; the invoice clears and settles once', async () => {
+    const { ctx, rec, logPath, requestsPath } = testContext({}, true);
+    const halcyon = (await fetchVendorTruth('vnd-halcyon-machining'))!;
+    const vendorRequest = testVendorRequest('vnd-halcyon-machining', HALCYON_NEW_BANK_PAYOUT_ADDRESS, halcyon.evmAddress, NOW - 60_000);
+    await appendVerifiedVendorBankChangeRequest(requestsPath, vendorRequest);
+
+    const out = await completeStepUp(proposalIdFor('inv-halcyon-bank-change'), verified(), ctx, NOW);
+    expect(out.kind).toBe('approved');
+    if (out.kind !== 'approved') return;
+    expect(out.holdReason).toBe('PREMISE_HELD_FOR_REVIEW');
+    expect(out.vendorRequest).toEqual(vendorRequest);
+    expect(out.vendorMasterChange).toEqual({
+      previousPayoutAddress: halcyon.payoutAddress,
+      newPayoutAddress: HALCYON_NEW_BANK_PAYOUT_ADDRESS,
+      appliedTo: 'fixture-overlay',
+    });
+    expect(out.reenforcedVerdict?.outcomeLabel).toBe('CLEARED');
+    expect(out.settlement.status).toBe('settled');
+    expect(await readVendorMasterChanges(logPath)).toHaveLength(1);
+    expect(rec.cleared).toHaveLength(1);
+    expect(rec.cleared[0]!.recipient.address).toBe(HALCYON_NEW_BANK_PAYOUT_ADDRESS);
+    expect(rec.cleared[0]!.valueUsdc).toBe(6_300_000_000n);
+    expect(rec.stepup).toHaveLength(0);
+
+    // The large halcyon invoice claims the (now updated) address on file and still only holds for size.
+    const large = await runEnforceForInvoice('inv-halcyon-machining', ctx);
+    expect(large.verdict.reasonCode).toBe(ReasonCode.IRREVERSIBLE_UNCONFIRMED);
+    // A second approval never pays again.
+    const again = await completeStepUp(proposalIdFor('inv-halcyon-bank-change'), verified(), ctx, NOW);
+    expect(again.kind).toBe('not-held');
+    expect(rec.cleared).toHaveLength(1);
   });
 
   it('refuses to step up a proposal that is not held, or unknown', async () => {
