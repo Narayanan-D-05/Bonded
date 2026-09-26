@@ -210,3 +210,13 @@ $15,000 halcyon invoice both screened clean (0 traits) and are HELD_FOR_STEPUP. 
 exposed an Intercepta schema mismatch (`txsCount` absent on some traits), fixed in the adapter; see
 FEEDBACK/intercepta.md. Still not run live: the World step-up and `settleWithStepUp` (needs a person
 to complete World ID on a phone), and the Xero source (needs Xero credentials).
+
+## 2026-09-26 — World step-up verified live, end to end
+
+A real person completed World ID on the sandbox for the genuine Globex bank-change invoice
+(proposal `0x5822aaa7…0c2d`). The approval wrote the confirmed new payout address to the vendor
+master (fixture-mode change log), `enforce()` re-ran and CLEARED, and the invoice settled on Sui
+testnet: digest `6RGhLEKACfW2i9FRf6ZZJRXBjyL7bxynae5GWus1Th4G`, 8,450 USDSUI to
+`0x053cbe6f…31ad` (verified on-chain). Remaining live gap: the halcyon IRREVERSIBLE_UNCONFIRMED path
+(`settleWithStepUp`) and the Xero source. Fixed: the post-callback redirect used the dev server's
+own address (`https://localhost:3000`) behind ngrok; it now uses WORLD_REDIRECT_URI's origin.

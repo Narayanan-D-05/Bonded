@@ -93,6 +93,26 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
+/**
+ * Where to send the browser after the OIDC callback. Behind a tunnel (ngrok), request.url is the
+ * dev server's own address (https://localhost:3000), which the browser cannot reach over HTTPS.
+ * The public origin is the one the user registered with World: take it from WORLD_REDIRECT_URI,
+ * then X-Forwarded-Host/Proto, and only then fall back to request.url.
+ */
+function publicOrigin(request: Request): string {
+  const configured = process.env.WORLD_REDIRECT_URI?.trim();
+  if (configured) {
+    try {
+      return new URL(configured).origin;
+    } catch {
+      // malformed value: fall through to the forwarded headers
+    }
+  }
+  const host = request.headers.get('x-forwarded-host');
+  if (host) return `${request.headers.get('x-forwarded-proto') ?? 'https'}://${host}`;
+  return new URL(request.url).origin;
+}
+
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -100,10 +120,10 @@ export async function GET(request: Request): Promise<Response> {
   const idpError = url.searchParams.get('error');
 
   if (idpError) {
-    return NextResponse.redirect(new URL(`/stepup?decision=denied&reason=${encodeURIComponent(idpError)}`, request.url));
+    return NextResponse.redirect(new URL(`/stepup?decision=denied&reason=${encodeURIComponent(idpError)}`, publicOrigin(request)));
   }
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/stepup?decision=denied&reason=missing_code_or_state', request.url));
+    return NextResponse.redirect(new URL('/stepup?decision=denied&reason=missing_code_or_state', publicOrigin(request)));
   }
 
   const callback = await handleCallback(code, state);
@@ -112,7 +132,7 @@ export async function GET(request: Request): Promise<Response> {
   const stored = await new JsonFileStepUpStore().read();
   const attempt = stored.attempts[state];
   if (!attempt) {
-    return NextResponse.redirect(new URL('/stepup?decision=denied&reason=unknown_attempt', request.url));
+    return NextResponse.redirect(new URL('/stepup?decision=denied&reason=unknown_attempt', publicOrigin(request)));
   }
 
   let query: string;
@@ -132,5 +152,5 @@ export async function GET(request: Request): Promise<Response> {
   } catch (error) {
     query = `decision=error&reason=${encodeURIComponent(error instanceof Error ? `${error.name}: ${error.message}` : String(error))}`;
   }
-  return NextResponse.redirect(new URL(`/stepup?proposal=${attempt.proposalHash}&${query}`, request.url));
+  return NextResponse.redirect(new URL(`/stepup?proposal=${attempt.proposalHash}&${query}`, publicOrigin(request)));
 }
