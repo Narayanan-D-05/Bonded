@@ -79,6 +79,14 @@ EVM address) refused by the Intercepta screen · suspended-corp refused · globe
 
 Full detail in `docs/THREATMODEL.md`.
 
+### The console UI
+
+`apps/console` routes: `/` (overview and live ledger totals), `/invoices` (inbox; status is read from
+the settlement ledger and does not run the agent), `/invoices/[id]` (the AP agent runs on open), `/stepup`,
+`/vendor/bank-change` and `/activity` (a read-only audit trail over the settlement ledger, the
+vendor-master change log and the IDKit request store). Every figure is read from those stores. There
+is no placeholder data. Styling is Tailwind plus the small components in `apps/console/components/ui/`.
+
 ## Sponsor tracks
 
 ### Intercepta — Safe Agent Payments
