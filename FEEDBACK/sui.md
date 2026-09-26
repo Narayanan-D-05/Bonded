@@ -120,3 +120,69 @@ verifiable on-chain, but is no longer reachable via `git log`.
   error*, then install the latest CLI" — but what you actually get is a panic with a backtrace
   hint, not a verification error, and it only hits `upgrade`. 1.73.1 is the newest binary we
   have installed, so the upgrade (and with it the live slash) is blocked on a CLI update.
+
+## 2026-09-26 — Commerce Edition `bonded_vault` + `bonded_registry` (PRD D.7)
+
+- **`sui client call` silently cannot invoke a non-`entry` `public fun` that returns an object —
+  the CLI does not auto-transfer the result.** `mint_verdict` returns a bare `Verdict` (by design,
+  so `settle` can consume it in the same PTB); calling it alone via `sui client call` failed with
+  `Error executing transaction '...': UnusedValueWithoutDrop { result_idx: 0, secondary_idx: 0 }`.
+  The fix is `sui client ptb` with `--assign` to bind the `Verdict` to a name and feed it straight
+  into `settle` as an argument in the same PTB, never letting it become a top-level "result" that
+  needs disposing. Obvious in hindsight, undocumented anywhere near `client call --help`.
+- **`sui client ptb` rejects inline bracket literals (`[1,2,3]`) as a `vector<u8>` argument to
+  `--move-call`** — `Unexpected '['`, even quoted. The working pattern is
+  `--make-move-vec "<u8>" "[34,86,..]" --assign proposal_hash` first, then pass the bound name
+  (`proposal_hash`, no `@`, no quotes) as the `--move-call` argument. A bare `0xdeadbeef`-style hex
+  literal *is* accepted for a `vector<u8>` position in some contexts but produced a confusing
+  `Expected an integer type but got vector<u8> for '3735928559'` error when mixed with other
+  positional args in our case — `--make-move-vec` was the reliable path and is what we used for
+  the real mint+settle transaction below.
+- **An object created and destroyed within the same transaction never appears anywhere in
+  `effects.created`/`effects.deleted` or `objectChanges` — not even as a net-zero pair.** Minting a
+  `Verdict` and consuming it via `settle` in one PTB left the `VerdictMinted` event as the only
+  on-chain trace of the object ever existing; `sui client object <verdict_id>` immediately after
+  returned `Object ... not found`, with no intermediate "created then deleted" line in the JSON
+  effects at all. This is arguably the cleanest possible confirmation of the design's central claim
+  ("no boolean flag to forget, because there is nothing left to check") — but if you're expecting
+  to *see* the deletion recorded anywhere queryable, per-transaction, you won't; only the emitted
+  event and the object's absence prove it happened.
+- **This project's testnet address holds two unrelated coins both named `usdsui::USDSUI`, from two
+  different packages.** `docs/VERIFY_FINDINGS.md` item 6 confirms
+  `0x832f9372…54cb::usdsui::USDSUI` (43,000 supply, `TreasuryCap` at `0x9de969…316b`) as the one
+  this project's address is the `TreasuryCap` holder for — but `sui client balance --json` also
+  shows a *second*, same-named `0x8f838f20…f239::usdsui::USDSUI` (1,000 supply, a different
+  `TreasuryCap`) sitting in the same wallet, presumably a leftover from an unrelated experiment on
+  this address. Matching on `symbol`/`name` alone would have picked the wrong coin type for the
+  vault's `T`; the package address is the only reliable discriminator. Recorded here so nobody
+  re-derives this the hard way.
+- **`Table`'s (and any private-field struct's) fields are genuinely inaccessible from a different
+  module, even a same-package `#[test_only]` test module** — Move's field-privacy is per-module,
+  not per-package. `BondedRegistry { id, current_policy_hash }` and `Vault<T> { id, balance,
+  spent_this_period }` cannot be pattern-matched from `bonded_registry_tests`/`bonded_vault_tests`
+  at all; the defining module has to expose a `#[test_only]` teardown helper
+  (`destroy_vault_for_testing`, `destroy_registry_for_testing`) that does the destructuring
+  internally. `vector<u8>` has `drop` (since `u8: drop`), so `table::drop` works directly on a
+  non-empty `Table<address, vector<u8>>` without walking every key first — worth knowing before
+  reaching for a manual `while`-loop drain.
+- **Nice, confirmed from the framework's own tests, not guessed:** `#[expected_failure(abort_code =
+  N)]` matches purely on the numeric abort code, with no `location` needed, even when the abort
+  actually originates in a *different* module than the one under test —
+  `sui-framework/tests/table_tests.move` pins `sui::dynamic_field::EFieldAlreadyExists` even though
+  the abort happens inside `dynamic_field`, called transitively through `table::add`. We relied on
+  this to pin `test_scenario::EEmptyInventory` (= `3`, confirmed from
+  `sui-framework/sources/test/test_scenario.move` — it's a private, non-`native` constant reached
+  via a plain `assert!`, so the code is knowable) for our own cap-gating tests, while deliberately
+  leaving the "can't refetch a deleted object" test as a bare `expected_failure` because that path
+  goes through the *native* `take_from_address_by_id`, whose abort code isn't visible in any
+  `.move` source we have — CLAUDE.md's rule against guessing a signature applies just as much to a
+  native abort code.
+- **Live confirmation, testnet, package
+  `0xf3d914b39722e1c6c3f0e274d088623c0e050d3125b8f658d48b94498efbf57a`:** minted a `CLEARED`
+  `Verdict` for 1,000,000 USDSUI base units and settled it against the shared `Vault<USDSUI>` in one
+  PTB (tx `CS9mZRfvCdKptwBFypyYsTC4DP2V2whynXz8PhghLuX6`) — the recipient's new `Coin<USDSUI>`
+  object shows `balance: "1000000"` exactly, and the vault's `spent_this_period` moved from `0` to
+  `1000000` in the same call. A follow-up dry-run minting a `HELD_FOR_STEPUP` verdict and passing it
+  straight to `settle` (skipping `settle_with_stepup`) aborted exactly as designed:
+  `MoveAbort(..., function_name: Some("settle") ..., 0)` — abort code `0` is
+  `EHeldForStepupNotSettleableDirectly`, and the dry run cost no gas.
