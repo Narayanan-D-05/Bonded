@@ -28,8 +28,31 @@ export function compareTimestamp(op: 'older_than' | 'younger_than', derived: big
   return op === 'older_than' ? derived > claimed : derived < claimed;
 }
 
-/** Evaluates one premise's claimed-vs-derived pair per its declared op. */
-export function evaluatePremise(def: Premise, claimed: bigint, derived: bigint): boolean {
+/**
+ * Evaluates one premise's claimed-vs-derived pair per its declared op.
+ *
+ * `claimedRaw` is always the raw string from `Proposal.premises[].claimedValue`
+ * — never pre-parsed by the caller (`enforce.ts`). `derived` is whatever
+ * `resolvePremise` actually returned: a `bigint` for magnitude/timestamp
+ * fields, or a `string` for categorical fields (e.g. `vendor.status`).
+ *
+ * When `derived` is a `string`, only `'eq'` is a valid op — a categorical
+ * field has no meaningful `gte`/`lte`/`older_than`/`younger_than` ordering,
+ * so any other op throws a `TypeError` naming the offending op and field
+ * rather than silently coercing. The bigint branch (existing behavior,
+ * unchanged) parses `claimedRaw` internally via `BigInt(claimedRaw)` instead
+ * of accepting an already-parsed bigint — this is what lets `enforce.ts`
+ * pass the raw string straight through without guessing whether a premise is
+ * categorical before calling this function.
+ */
+export function evaluatePremise(def: Premise, claimedRaw: string, derived: bigint | string): boolean {
+  if (typeof derived === 'string') {
+    if (def.op !== 'eq') {
+      throw new TypeError(`op '${def.op}' is not valid for a categorical (string) premise field '${def.field}'`);
+    }
+    return claimedRaw === derived;
+  }
+  const claimed = BigInt(claimedRaw);
   switch (def.op) {
     case 'gte':
       return derived >= claimed;

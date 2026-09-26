@@ -74,7 +74,7 @@ export interface EnforceDeps {
    * adapter owns `def.schema` — this package never inspects that string
    * itself, only passes it through.
    */
-  resolvePremise(def: Premise, at: bigint): Promise<bigint | null>;
+  resolvePremise(def: Premise, at: bigint): Promise<bigint | string | null>;
   /**
    * Pins ONE checkpoint for the entire proposal. Called at most once per
    * `enforce()` call, and ONLY after the forbidden-action check (step 2)
@@ -191,13 +191,23 @@ export async function enforce(
       return refuse(proposal, policyHash, ReasonCode.PREMISE_UNRESOLVABLE, blockChecked, deps.computeLogRef);
     }
 
-    const claimed = BigInt(claim.claimedValue);
-    const ok = evaluatePremise(def, claimed, derived);
+    // Pass the raw claimed string straight through — do NOT pre-parse it as
+    // a bigint here. A categorical premise (e.g. `vendor.status: 'active'`)
+    // has a `claimedValue` like `"active"`; `BigInt("active")` would throw.
+    // The bigint parse now happens inside `evaluatePremise`, gated on
+    // `derived`'s runtime type (see tolerance.ts).
+    const ok = evaluatePremise(def, claim.claimedValue, derived);
 
     if (!ok) {
       // Record BOTH values — this pair is what the premise diff table renders.
       await deps.logMismatch(proposal.id, def.id, claim.claimedValue, derived.toString());
-      return refuse(proposal, policyHash, ReasonCode.PREMISE_MISMATCH, blockChecked, deps.computeLogRef);
+      // `holdOnMismatch` premises produce a HELD_FOR_STEPUP verdict instead
+      // of a hard refuse — a human reviews the mismatch rather than the
+      // proposal being killed outright. Default (unset/false) is today's
+      // unchanged hard-refuse behavior.
+      return def.holdOnMismatch
+        ? hold(proposal, policyHash, ReasonCode.PREMISE_HELD_FOR_REVIEW, blockChecked, deps.computeLogRef)
+        : refuse(proposal, policyHash, ReasonCode.PREMISE_MISMATCH, blockChecked, deps.computeLogRef);
     }
   }
 

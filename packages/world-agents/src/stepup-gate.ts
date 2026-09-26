@@ -50,13 +50,14 @@ import type { HandleCallbackResult } from './flow.js';
 export const STEPUP_FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 
 /**
- * `ReasonCode.IRREVERSIBLE_UNCONFIRMED` is imported directly from `@bonded/seam` (value 6
- * as of this writing) — the seam's Migration PRD D.2 extension has landed, so this package
- * does not need to guess or locally re-declare that enum. `HeldProposal.holdReason` is
- * narrowed to exactly this one value: a step-up gate only ever exists to clear THIS hold
- * reason, never `BUDGET_EXCEEDED` or any other `ReasonCode`.
+ * `ReasonCode.IRREVERSIBLE_UNCONFIRMED` and `ReasonCode.PREMISE_HELD_FOR_REVIEW` are imported
+ * directly from `@bonded/seam` — the seam's extension has landed, so this package does not
+ * need to guess or locally re-declare that enum. `HeldProposal.holdReason` is narrowed to
+ * exactly these two values: a step-up gate only ever exists to clear one of these two hold
+ * reasons (an irreversible-threshold hold, or a premise mismatch held for human review),
+ * never `BUDGET_EXCEEDED` or any other `ReasonCode`.
  */
-export type HoldReason = ReasonCode.IRREVERSIBLE_UNCONFIRMED;
+export type HoldReason = ReasonCode.IRREVERSIBLE_UNCONFIRMED | ReasonCode.PREMISE_HELD_FOR_REVIEW;
 
 export class HeldProposalError extends Error {
   constructor(message: string) {
@@ -75,12 +76,12 @@ export function fromHeldVerdict(verdict: Verdict, boundSub?: string): HeldPropos
   if (verdict.outcome !== 2) {
     throw new HeldProposalError(`Verdict outcome is ${verdict.outcome}, expected 2 (HELD_FOR_STEPUP)`);
   }
-  if (verdict.reasonCode !== ReasonCode.IRREVERSIBLE_UNCONFIRMED) {
+  if (verdict.reasonCode !== ReasonCode.IRREVERSIBLE_UNCONFIRMED && verdict.reasonCode !== ReasonCode.PREMISE_HELD_FOR_REVIEW) {
     throw new HeldProposalError(
-      `Verdict reasonCode is ${ReasonCode[verdict.reasonCode] ?? verdict.reasonCode}, expected IRREVERSIBLE_UNCONFIRMED`,
+      `Verdict reasonCode is ${ReasonCode[verdict.reasonCode] ?? verdict.reasonCode}, expected IRREVERSIBLE_UNCONFIRMED or PREMISE_HELD_FOR_REVIEW`,
     );
   }
-  return { proposalHash: verdict.proposalHash, holdReason: ReasonCode.IRREVERSIBLE_UNCONFIRMED, ...(boundSub !== undefined ? { boundSub } : {}) };
+  return { proposalHash: verdict.proposalHash, holdReason: verdict.reasonCode, ...(boundSub !== undefined ? { boundSub } : {}) };
 }
 
 export interface HeldProposal {

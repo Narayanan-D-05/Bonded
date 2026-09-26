@@ -173,4 +173,9 @@ describe('fromHeldVerdict — building a HeldProposal from the enforcer\'s real 
   test('a HELD_FOR_STEPUP verdict with a different reasonCode (e.g. BUDGET_EXCEEDED) is refused', () => {
     expect(() => fromHeldVerdict(heldVerdict({ reasonCode: ReasonCode.BUDGET_EXCEEDED }))).toThrow(HeldProposalError);
   });
+
+  test('a genuine HELD_FOR_STEPUP / PREMISE_HELD_FOR_REVIEW verdict converts cleanly, with holdReason set to the reason it actually was', () => {
+    const held = fromHeldVerdict(heldVerdict({ reasonCode: ReasonCode.PREMISE_HELD_FOR_REVIEW }));
+    expect(held).toEqual({ proposalHash: HASH, holdReason: ReasonCode.PREMISE_HELD_FOR_REVIEW });
+  });
 });

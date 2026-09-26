@@ -40,6 +40,10 @@ export interface Premise {
   /** Always string-encoded — never parse this as a float. */
   value: string;
   toleranceBps?: number;
+  /** On mismatch, produce HELD_FOR_STEPUP instead of a hard REFUSE. Default false = today's behavior. */
+  holdOnMismatch?: boolean;
+  /** Ordered subject args (vendorId, address, chain...) the dispatcher passes to the adapter's field fn. */
+  args?: string[];
 }
 
 export interface Proposal {
@@ -66,6 +70,7 @@ export enum ReasonCode {
   BUDGET_EXCEEDED = 4,
   STALE_POLICY = 5,
   IRREVERSIBLE_UNCONFIRMED = 6,
+  PREMISE_HELD_FOR_REVIEW = 7,
 }
 
 export interface Verdict {
