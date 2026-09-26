@@ -65,6 +65,13 @@ export const IDKIT_ENV = {
   action: 'WORLD_IDKIT_ACTION',
   signingKey: 'WORLD_IDKIT_SIGNING_KEY',
   environment: 'WORLD_IDKIT_ENVIRONMENT',
+  /**
+   * Required to verify STAGING (Simulator) or sandbox proofs. The Developer Portal issues it when a
+   * staging verification window is opened (MCP tool `set_world_id_staging_verification`); it is sent
+   * as the `x-staging-verification-token` header on /api/v4/verify and expires with the window.
+   * Without an open window World answers `environment_not_allowed`. Not needed for production.
+   */
+  stagingVerificationToken: 'WORLD_IDKIT_STAGING_VERIFICATION_TOKEN',
 } as const;
 
 export const IDKIT_ENVIRONMENTS = ['production', 'staging', 'sandbox'] as const;
@@ -80,6 +87,8 @@ export interface IdkitPublicConfig {
 export interface IdkitConfig extends IdkitPublicConfig {
   /** Present only when requested (`needSigningKey`). Server-only. */
   signingKeyHex?: string;
+  /** Staging/sandbox only: the Portal's staging verification window token. Server-only. */
+  stagingVerificationToken?: string;
 }
 
 export type IdkitConfigResult = { ok: true; config: IdkitConfig } | { ok: false; missing: string[]; invalid: string[] };
@@ -108,6 +117,7 @@ export function readIdkitConfig(env: Record<string, string | undefined>, options
       action: get(IDKIT_ENV.action),
       environment: envValue as IdkitEnvironment,
       ...(options.needSigningKey ? { signingKeyHex: get(IDKIT_ENV.signingKey) } : {}),
+      ...(get(IDKIT_ENV.stagingVerificationToken) !== '' ? { stagingVerificationToken: get(IDKIT_ENV.stagingVerificationToken) } : {}),
     },
   };
 }
@@ -277,6 +287,17 @@ export async function submitVendorBankChange(
   const cfg = readIdkitConfig(deps.env, { needSigningKey: false });
   if (!cfg.ok) return { ok: false, status: 501, reason: 'missing_env', detail: describeConfigProblem(cfg), missingEnv: [...cfg.missing, ...cfg.invalid] };
   const { config } = cfg;
+  if (config.environment !== 'production' && !config.stagingVerificationToken) {
+    return {
+      ok: false,
+      status: 501,
+      reason: 'missing_env',
+      detail:
+        `${IDKIT_ENV.stagingVerificationToken} is not set. World only verifies ${config.environment} proofs during a Developer Portal ` +
+        'staging verification window, identified by that token (open one with the Portal MCP tool set_world_id_staging_verification). Nothing was recorded.',
+      missingEnv: [IDKIT_ENV.stagingVerificationToken],
+    };
+  }
 
   let claim: VendorBankChangeClaim;
   try {
@@ -301,7 +322,14 @@ export async function submitVendorBankChange(
   try {
     const res = await deps.fetch(verifyUrl(config.rpId, deps.verifyBaseUrl), {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        // Staging/sandbox proofs are only accepted during a Portal staging verification window,
+        // identified by this header (learned from the Portal MCP; not in the verify docs).
+        ...(config.environment !== 'production' && config.stagingVerificationToken
+          ? { 'x-staging-verification-token': config.stagingVerificationToken }
+          : {}),
+      },
       // As-is: the exact object IDKit returned, no remapping (integrate Step 5).
       body: JSON.stringify(body.idkitResult),
       cache: 'no-store',
