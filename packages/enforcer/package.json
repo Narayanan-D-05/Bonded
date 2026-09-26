@@ -1,8 +1,8 @@
 {
-  "name": "@bonded/seam",
+  "name": "@bonded/enforcer",
   "version": "1.0.0",
   "private": true,
-  "description": "Canonical Bonded Commerce Edition seam types (Proposal/Verdict/ReasonCode/PolicyArtifact) and fixed-point money, defined once with zero runtime dependencies.",
+  "description": "The enforce() decision loop (Implementation PRD Part D.2 / Migration PRD Part D.3): stale-policy check, forbidden-action check, pinned-checkpoint premise resolution, budget check, irreversible-threshold hold. Zero chain dependency of its own — everything chain- or adapter-specific is dependency-injected.",
   "type": "module",
   "exports": {
     ".": {
@@ -21,7 +21,11 @@
     "clean": "rm -rf dist",
     "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs"
   },
+  "dependencies": {
+    "@bonded/seam": "workspace:*"
+  },
   "devDependencies": {
+    "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
     "jest": "^29.7.0",
