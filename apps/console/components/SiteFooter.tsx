@@ -19,11 +19,12 @@ export function SiteFooter() {
           style={{ columnGap: 'clamp(56px, 12vw, 160px)', rowGap: 48, marginTop: 56 }}
         >
           {SPONSORS.map((id) => (
-            <li key={id} className="flex flex-col items-center gap-3">
-              <div className="rounded-3xl bg-white p-4 shadow-[0_18px_40px_-18px_rgba(26,99,191,0.45)] ring-1 ring-[#DCEBFF]">
-                <SponsorLogo sponsor={id} size={84} alt={sponsorName(id)} />
-              </div>
-              <span className="text-base font-semibold text-[#0B1B33]">{sponsorName(id)}</span>
+            <li
+              key={id}
+              className="group flex flex-col items-center gap-2 opacity-45 grayscale transition duration-300 hover:opacity-100 hover:grayscale-0"
+            >
+              <SponsorLogo sponsor={id} size={52} alt={sponsorName(id)} />
+              <span className="text-sm font-semibold text-[#0B1B33]">{sponsorName(id)}</span>
             </li>
           ))}
         </ul>
