@@ -100,3 +100,122 @@ samp {
 .perforation {
   border-top: 1px dashed rgba(14, 22, 20, 0.28);
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CONSOLE THEME. Everything below is scoped to `.console`, the wrapper that
+   components/ConsoleFrame.tsx puts around the nav, pages and footer on every
+   route except /deck, so the deck's own look (above) is untouched.
+   White and Sui blue. Tokens and contrast notes: tailwind.config.ts.
+════════════════════════════════════════════════════════════════════════════ */
+.console {
+  --sui: #1a63bf;
+  --sui-brand: #4da2ff;
+  --panel: #ffffff;
+  --rule: #cfe3fb;
+  background-color: #ffffff;
+  color: #0b1b33;
+  /* macOS-style arrow, drawn here (not Apple's asset): black body, white edge, soft shadow. Hotspot at the tip. */
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M5 3 L5 21.5 L9.6 17.3 L12.6 24.2 L15.6 22.9 L12.7 16.2 L19 16.2 Z' transform='translate(0.6 1.1)' fill='black' fill-opacity='0.28'/%3E%3Cpath d='M5 3 L5 21.5 L9.6 17.3 L12.6 24.2 L15.6 22.9 L12.7 16.2 L19 16.2 Z' fill='black' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") 5 3, auto;
+}
+
+/* The matching hand on everything clickable. :where() keeps specificity at one class, so
+   Tailwind's disabled:cursor-not-allowed still wins on disabled buttons. */
+.console :where(a[href], button, [role='button'], summary, label[for], select) {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M10.2 4.2c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v7.2c0-.9.8-1.6 1.7-1.6s1.7.7 1.7 1.6v1c0-.9.8-1.6 1.7-1.6s1.7.7 1.7 1.6v1.2c0-.9.7-1.5 1.5-1.5s1.5.7 1.5 1.5v5.2c0 3.6-2.6 6.2-6.2 6.2h-2.3c-2.2 0-3.6-.9-4.8-2.5l-4.3-6c-.6-.9-.4-2 .4-2.6.8-.6 1.9-.4 2.5.4l1.9 2.5z' transform='translate(0.6 1.1)' fill='black' fill-opacity='0.28'/%3E%3Cpath d='M10.2 4.2c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8v7.2c0-.9.8-1.6 1.7-1.6s1.7.7 1.7 1.6v1c0-.9.8-1.6 1.7-1.6s1.7.7 1.7 1.6v1.2c0-.9.7-1.5 1.5-1.5s1.5.7 1.5 1.5v5.2c0 3.6-2.6 6.2-6.2 6.2h-2.3c-2.2 0-3.6-.9-4.8-2.5l-4.3-6c-.6-.9-.4-2 .4-2.6.8-.6 1.9-.4 2.5.4l1.9 2.5z' fill='white' stroke='black' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M13.8 11.4v4.4M17.2 12.4v3.6M20.6 13.6v2.6' stroke='black' stroke-width='1.1' stroke-linecap='round'/%3E%3C/svg%3E") 12 3, pointer;
+}
+
+/* Text fields keep the native I-beam. */
+.console :where(input, textarea, [contenteditable]:not([contenteditable='false'])) {
+  cursor: auto;
+}
+
+.console :focus-visible {
+  outline: 2px solid var(--sui);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.95);
+}
+
+/* ── Boxes: white cards on the blue-tinted page ────────────────────────────
+   1px light-blue border, 16px radius, white fill, a soft blue-tinted shadow,
+   and `.box-head`, a light-blue header strip with navy text (~15:1). The box
+   clips the strip, so it rounds only at the top corners.
+────────────────────────────────────────────────────────────────────────── */
+.console .box {
+  background-color: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgb(11 27 51 / 0.04),
+    0 18px 40px -20px rgb(26 99 191 / 0.28);
+}
+
+.console .box-head {
+  background-color: #eaf4ff;
+  border-bottom: 1px solid var(--rule);
+  color: #0b1b33;
+}
+
+/* Hover lift for boxes that are links or interactive cards. */
+.console .box-lift {
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+.console .box-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 2px rgb(11 27 51 / 0.05),
+    0 26px 50px -20px rgb(26 99 191 / 0.4);
+}
+
+/* Section canvases: white and very light blue, with soft Sui-blue glows. */
+.console .bg-hero {
+  background:
+    radial-gradient(56rem 28rem at 85% -10%, rgb(77 162 255 / 0.28), transparent 60%),
+    radial-gradient(40rem 22rem at -10% 110%, rgb(77 162 255 / 0.14), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #eaf4ff 100%);
+}
+.console .bg-band {
+  background:
+    radial-gradient(50rem 20rem at 50% 0%, rgb(77 162 255 / 0.12), transparent 70%),
+    #f4f9ff;
+}
+.console .bg-deep {
+  background-color: #ffffff;
+}
+.console .bg-cta {
+  background:
+    radial-gradient(40rem 20rem at 20% 0%, rgb(77 162 255 / 0.3), transparent 70%),
+    linear-gradient(180deg, #eaf4ff 0%, #f4f9ff 100%);
+}
+
+/* Gradient text in the Sui family on one key hero phrase: #0B4DA2 to #1A63BF to #2F7FD9, all
+   >= 4:1 on the hero's white-to-light-blue (large display text needs 3:1). */
+.console .text-sui-gradient {
+  background: linear-gradient(90deg, #0b4da2 0%, #1a63bf 50%, #2f7fd9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Hero video backdrop: hidden under reduced motion (the static gradient shows instead). */
+@media (prefers-reduced-motion: reduce) {
+  .console .hero-video {
+    display: none;
+  }
+  .console .box-lift:hover {
+    transform: none;
+  }
+}
+
+.console .perforation-dark {
+  border-top: 1px dashed #b9d4f5;
+}
+
+/* Footer globe (components/SiteFooter.tsx), as on bondedfi.vercel.app: the dark end.png art inverted
+   into a light, blue-leaning drawing that multiplies onto the white footer. */
+.glyph-art-light {
+  filter: invert(1) hue-rotate(180deg) saturate(1.35) contrast(1.05);
+  mix-blend-mode: multiply;
+}

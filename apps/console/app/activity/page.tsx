@@ -8,7 +8,9 @@ import { SuiscanLink } from '../../components/ui/ExternalLink';
 import { formatUtc } from '../../components/ui/format';
 import { Hash } from '../../components/ui/Hash';
 import { Notice } from '../../components/ui/Notice';
-import { PageHeader } from '../../components/ui/PageHeader';
+import { Accent, PageHero, Section } from '../../components/ui/PageHeader';
+import { Panel, Stat } from '../../components/ui/Panel';
+import type { Sponsor } from '../../components/ui/SponsorLogo';
 
 // Read-only, re-read on every request from the existing stores.
 export const dynamic = 'force-dynamic';
@@ -35,44 +37,56 @@ export default async function ActivityPage() {
     !requests.ok && { store: 'IDKit vendor bank-change requests', error: requests.error },
   ].filter((f): f is { store: string; error: string } => Boolean(f));
 
+  const settledCount = ledgerEntries.filter((e) => e.status === 'settled').length;
+
   return (
-    <div>
-      <PageHeader
-        kicker="Form AP-9 · Audit trail"
-        title="Activity"
+    <>
+      <PageHero
+        eyebrow="Form AP-9 · Audit trail"
+        title={
+          <>
+            Activity, <Accent>from the records.</Accent>
+          </>
+        }
         lede="Every payment, vendor-record change and verified vendor request, newest first, read from the records themselves. People appear only as World pseudonyms: the World subject of an approving controller, or the IDKit nullifier of a verifying vendor representative."
-      />
+      >
+        <dl className="mt-10 grid gap-5 sm:grid-cols-3">
+          <Count label="Settlements (ledger)" sponsor="sui" value={ledger.ok ? ledgerEntries.length : null} note={ledger.ok ? `${settledCount} settled on Sui` : undefined} />
+          <Count label="Vendor-master changes" sponsor="world" value={changes.ok ? changes.value.length : null} note="Approved with World ID" />
+          <Count label="Verified vendor requests" sponsor="world" value={requests.ok ? requests.value.length : null} note="Verified with IDKit" />
+        </dl>
+      </PageHero>
 
-      <dl className="mb-8 grid grid-cols-1 gap-px overflow-hidden rounded-doc border border-hairline bg-hairline sm:grid-cols-3">
-        <Count label="Settlements (ledger)" value={ledger.ok ? ledgerEntries.length : null} />
-        <Count label="Vendor-master changes" value={changes.ok ? changes.value.length : null} />
-        <Count label="Verified vendor requests" value={requests.ok ? requests.value.length : null} />
-      </dl>
+      <Section tone="deep" eyebrow="Timeline" title="Newest first">
+        {failures.map((f) => (
+          <Notice key={f.store} tone="error" role="alert" title={`${f.store} could not be read`} className="mb-4">
+            <span className="font-mono text-xs">{f.error}</span>
+          </Notice>
+        ))}
 
-      {failures.map((f) => (
-        <Notice key={f.store} tone="error" role="alert" title={`${f.store} could not be read`} className="mb-4">
-          <span className="font-mono text-xs">{f.error}</span>
-        </Notice>
-      ))}
-
-      {events.length === 0 ? (
-        <p className="text-sm text-fog">Nothing recorded yet.</p>
-      ) : (
-        <ol className="relative space-y-0 border-l border-hairline pl-0" aria-label="Audit trail, newest first">
-          {events.map((e) => (
-            <TimelineItem key={eventKey(e)} event={e} />
-          ))}
-        </ol>
-      )}
-    </div>
+        {events.length === 0 ? (
+          <Panel label="Audit trail">
+            <p className="text-sm text-muted">Nothing recorded yet.</p>
+          </Panel>
+        ) : (
+          <ol className="relative space-y-5 border-l-2 border-sui/40 pl-5 sm:pl-8" aria-label="Audit trail, newest first">
+            {events.map((e) => (
+              <TimelineItem key={eventKey(e)} event={e} />
+            ))}
+          </ol>
+        )}
+      </Section>
+    </>
   );
 }
 
-function Count({ label, value }: { label: string; value: number | null }) {
+function Count({ label, value, sponsor, note }: { label: string; value: number | null; sponsor: Sponsor; note?: string | undefined }) {
   return (
-    <div className="bg-deepwater px-5 py-4">
-      <dt className="text-xs uppercase tracking-wider text-fog">{label}</dt>
-      <dd className="mt-1 font-mono text-2xl font-semibold text-manifest">{value === null ? <span className="text-stamp-lit">unreadable</span> : value}</dd>
+    <div>
+      <dt className="sr-only">{label}</dt>
+      <dd>
+        <Stat label={label} sponsor={sponsor} value={value === null ? <span className="text-refused">unreadable</span> : value} tone="sui" note={note} />
+      </dd>
     </div>
   );
 }
@@ -86,55 +100,56 @@ function eventKey(e: ActivityEvent): string {
 function InvoiceRef({ proposalHash, invoiceId }: { proposalHash: string; invoiceId?: string }) {
   const id = invoiceId ?? findInvoiceIdByProposalHash(proposalHash);
   return id ? (
-    <Link href={`/invoices/${id}`} className="font-mono text-manifest underline-offset-2 hover:underline">
+    <Link href={`/invoices/${id}`} className="font-mono text-sui underline-offset-2 hover:underline">
       {id}
     </Link>
   ) : (
-    <Hash value={proposalHash} className="text-manifest" />
+    <Hash value={proposalHash} className="text-navy" />
   );
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
-      <dt className="text-fog">{label}</dt>
-      <dd className="min-w-0 break-all font-mono text-manifest">{children}</dd>
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 break-all font-mono text-navy">{children}</dd>
     </>
   );
 }
 
 function TimelineItem({ event }: { event: ActivityEvent }) {
-  let dot = 'bg-fog';
+  let dot = 'bg-muted';
   let tag = '';
-  let tagCls = 'text-fog border-hairline';
+  let tagCls = 'text-muted border-rule';
+  let sponsor: Sponsor = 'sui';
   let title: ReactNode = null;
   let body: ReactNode = null;
 
   if (event.kind === 'settlement') {
     const e = event.entry;
     if (e.status === 'settled') {
-      dot = 'bg-seal';
+      dot = 'bg-cleared';
       tag = e.viaStepup ? 'Paid · step-up' : 'Paid';
-      tagCls = 'text-seal border-seal/60';
+      tagCls = 'text-cleared border-cleared/70';
       title = (
         <>
           <InvoiceRef proposalHash={e.proposalHash} invoiceId={e.invoiceId} /> paid{' '}
-          <span className="font-mono text-seal">{formatUsdc6(e.valueUsdc)} USDSUI</span> to {e.vendorId}
+          <span className="font-mono text-cleared">{formatUsdc6(e.valueUsdc)} USDSUI</span> to {e.vendorId}
         </>
       );
       body = (
         <>
           <Row label="Digest">
-            <SuiscanLink explorerUrl={e.explorerUrl} digest={e.digest} full />
+            <SuiscanLink explorerUrl={e.explorerUrl} digest={e.digest} full className="text-sui" />
           </Row>
           <Row label="Recipient">{e.recipient}</Row>
           <Row label="Path">{e.viaStepup ? 'settle_with_stepup' : 'settle (cleared, no human)'}</Row>
         </>
       );
     } else {
-      dot = e.status === 'unknown' ? 'bg-stamp-lit' : 'bg-hold';
+      dot = e.status === 'unknown' ? 'bg-refused' : 'bg-held';
       tag = e.status === 'unknown' ? 'Settlement unknown' : 'Settling';
-      tagCls = e.status === 'unknown' ? 'text-stamp-lit border-stamp/70' : 'text-hold border-hold/60';
+      tagCls = e.status === 'unknown' ? 'text-refused border-refused/70' : 'text-held border-held/70';
       title = (
         <>
           <InvoiceRef proposalHash={e.proposalHash} invoiceId={e.invoiceId} />{' '}
@@ -145,9 +160,10 @@ function TimelineItem({ event }: { event: ActivityEvent }) {
     }
   } else if (event.kind === 'vendor-master-change') {
     const c = event.change;
-    dot = 'bg-manifest';
+    dot = 'bg-navy';
     tag = 'Vendor record changed';
-    tagCls = 'text-manifest border-manifest/50';
+    tagCls = 'text-navy border-navy/50';
+    sponsor = 'world';
     title = (
       <>
         {c.vendorId} payout address changed ({c.appliedTo}), approved for <InvoiceRef proposalHash={c.proposalHash} />
@@ -165,9 +181,10 @@ function TimelineItem({ event }: { event: ActivityEvent }) {
     );
   } else {
     const r = event.request;
-    dot = 'bg-fog';
+    dot = 'bg-muted';
     tag = 'Vendor request verified';
-    tagCls = 'text-fog border-hairline';
+    tagCls = 'text-muted border-muted/50';
+    sponsor = 'world';
     title = (
       <>
         {r.vendorId} filed a bank change, verified with World ID via IDKit ({r.credentialType}, World ID {r.protocolVersion}, {r.environment})
@@ -185,17 +202,24 @@ function TimelineItem({ event }: { event: ActivityEvent }) {
     );
   }
 
+  const label = sponsor === 'sui' ? 'Payment · Sui' : event.kind === 'vendor-master-change' ? 'Approval · World ID' : 'Vendor request · World IDKit';
   return (
-    <li className="relative pb-8 pl-6 last:pb-0 sm:pl-8">
-      <span className={`absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-harbor ${dot}`} aria-hidden="true" />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <time className="font-mono text-xs text-fog" dateTime={new Date(event.atMs).toISOString()}>
-          {formatUtc(event.atMs)}
-        </time>
-        <span className={`rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ${tagCls}`}>{tag}</span>
-      </div>
-      <p className="mt-1.5 break-words text-sm text-manifest">{title}</p>
-      {body && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-doc border border-hairline bg-deepwater px-3 py-2 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">{body}</dl>}
+    <li className="relative">
+      <span className={`absolute -left-[27px] top-5 h-3 w-3 rounded-full ring-4 ring-ocean-950 sm:-left-[39px] ${dot}`} aria-hidden="true" />
+      <Panel
+        as="div"
+        label={label}
+        sponsor={sponsor}
+        aside={
+          <time className="font-mono" dateTime={new Date(event.atMs).toISOString()}>
+            {formatUtc(event.atMs)}
+          </time>
+        }
+      >
+        <span className={`inline-flex rounded-full border bg-white px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider ${tagCls}`}>{tag}</span>
+        <p className="mt-2 break-words text-sm text-navy">{title}</p>
+        {body && <dl className="mt-3 grid gap-x-4 gap-y-1 rounded-xl border border-rule bg-raised px-3 py-2 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">{body}</dl>}
+      </Panel>
     </li>
   );
 }
