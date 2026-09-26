@@ -219,3 +219,13 @@ samp {
   filter: invert(1) hue-rotate(180deg) saturate(1.35) contrast(1.05);
   mix-blend-mode: multiply;
 }
+
+/* Footer sponsor logos: a slow, gentle float (each logo offset by its own animation-delay). */
+@keyframes sponsor-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+.sponsor-float { animation: sponsor-float 6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .sponsor-float { animation: none; }
+}
