@@ -37,18 +37,50 @@ Sponsors: **Intercepta · Sui · World (ID for Agents).**
 | `packages/seam` | Shared types, fixed-point money math |
 | `packages/enforcer` | The refusal/hold engine — five checks, zero chain dependency |
 | `packages/dispatcher` | Routes a policy's premise to the adapter that owns it |
-| `packages/issuer-oracle` | Vendor-master truth (disclosed stand-in for a real ERP/vendor-master system) |
-| `packages/intercepta-adapter` | Live Intercepta payment-risk screening (EVM/ENS only — see the Sui/EVM note below) |
+| `packages/issuer-oracle` | Vendor-master truth: the disclosed fixture (default), or a real Xero org (`VENDOR_MASTER_SOURCE=xero`) |
+| `packages/intercepta-adapter` | Live Intercepta screening of the payee's claimed EVM identity (fail-closed without a key) |
 | `packages/world-agents` | World ID step-up for the payout-address-changed / irreversible case |
+| `packages/sui-settlement` | Submits the real Sui settlement for a verdict (`settleCleared`, `settleWithStepUp`); reads the policy hash and vault spend on-chain |
 | `move/` | Sui settlement objects (`Verdict`, consumed on settle — see `move/DEPLOYMENTS.md`) |
-| `packages/villain-corpus` | The spoofed-invoice demo artifact + three real, no-mock `enforce()` outcomes |
-| `apps/console` | Invoice Inbox — real premise-diff table, real verdict, real step-up route |
+| `packages/villain-corpus` | The spoofed-invoice demo artifact + three key-free, no-mock `enforce()` outcomes + a key-gated screen |
+| `apps/console` | Invoice Inbox — real premise-diff table, real verdict, automatic Sui payout on `CLEARED`, real step-up route |
 
-**Known limitation, stated plainly:** every payout address in this demo is Sui-shaped, and
-Intercepta only screens 20-byte EVM addresses or ENS names — so the Intercepta leg of the villain
-demo fails visibly rather than running. A real deployment needs vendor payout addresses tracked as
-(or linked to) EVM addresses. Full detail in `docs/THREATMODEL.md`.
+**The loop is closed for the clean case, on testnet.** `POST /api/enforce` reads the AP agent's policy
+hash from `BondedRegistry` and the budget from the vault's real `spent_this_period`, runs `enforce()`,
+and on `CLEARED` pays the vendor-master address (never the address the invoice claims). Each invoice
+pays at most once. Live: acme was paid through the console route, digest
+`BkuSQ6nhyEXBXvGs9X3kiX3WVgTkPZ9HAkEdNgDqwP69`; a second POST returned the same digest and paid
+nothing. Every digest is in `move/DEPLOYMENTS.md`.
 
-**Still needed to close the loop:** Sui settlement isn't wired to the enforcer's output yet
-(`enforce()`'s `CLEARED` verdict doesn't currently trigger a real `settle()` call), and the spoofed
-invoice page isn't hosted anywhere public yet. Both are named next steps, not silent gaps.
+**Demo invoices:** acme `CLEARED` and paid · spoofed globex (claims a real OFAC-listed Lazarus Group
+EVM address) refused by the Intercepta screen · suspended-corp refused · globex genuine bank change
+`HELD` for World step-up · halcyon ($15,000) `HELD` over the $10,000 irreversible threshold, then
+`settleWithStepUp`. The last two need keys.
+
+**Stated plainly:**
+- None of the Intercepta, World or Xero flows has run live yet; each needs the keys below. Without
+  `INTERCEPTA_API_KEY` the screened invoices fail closed (`REFUSED` / `PREMISE_UNRESOLVABLE`), never
+  pass.
+- Intercepta screens the EVM identity the payee *claims*, not the Sui address the money goes to. The
+  link is asserted by the invoice, backed by a hard-refuse check that the claimed identity matches the
+  vendor's registered one.
+- The vendor master is still the disclosed fixture by default. The spoofed-invoice page isn't hosted
+  publicly. There's no policy compiler, and the World identity isn't linked to a Sui account.
+- Opening an invoice detail page triggers the agent's POST, which pays if `CLEARED`.
+
+Full detail in `docs/THREATMODEL.md`.
+
+## Keys you need to add
+
+Put these in `.env` (copy `.env.example`; `.env` is never committed). Sui signing uses the Sui CLI
+keystore, not `.env`.
+
+| Key | Where to get it | What it unlocks |
+|---|---|---|
+| `INTERCEPTA_API_KEY` | intercepta.io/ethglobal | The live screen (globex and halcyon invoices, villain-corpus scenario 4) |
+| `WORLD_SANDBOX_CLIENT_ID`, `WORLD_SANDBOX_CLIENT_SECRET`, `WORLD_REDIRECT_URI` | The World sandbox portal. The redirect URI must be HTTPS, so expose the console through a tunnel | The step-up, and with it `settleWithStepUp` and the bank-change approval |
+| `VENDOR_MASTER_SOURCE=xero`, `XERO_CLIENT_ID`, `XERO_CLIENT_SECRET` (optional `XERO_TENANT_ID`) | A Xero Custom Connection against the Demo Company (free for development) | The real accounting system. Then run `pnpm --filter @bonded/issuer-oracle xero:setup`, and `xero:check` to read it back |
+
+Also get the pinned known-risk test addresses from Intercepta's Discord, to confirm what a flagged
+address returns before relying on the screen. Note: re-running `xero:setup` reverts an approved bank
+change in Xero.

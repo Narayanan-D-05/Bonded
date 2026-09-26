@@ -6,6 +6,11 @@ function signature, deployed address, and test count below was read or run direc
 repository on 2026-09-26. Where something could not be confirmed this way, it is stated as
 unconfirmed rather than guessed (see "Honest disclosures" below).
 
+**Revised later on 2026-09-26** for three changes, each re-read in the source: Intercepta now screens
+the payee's claimed EVM identity (not the Sui payout address); a `CLEARED` verdict now settles on Sui
+automatically from the console; and the vendor master can be a real Xero org. The test counts in §11
+were re-run for this revision.
+
 This supersedes two earlier documents, no longer present in the working tree (removed once this file
 existed to replace them; both are still recoverable from git history): `BONDED_IMPLEMENTATION_PRD.md`
 (the original ETHOnline Graph/Arc/Ledger spec) and `BONDED_COMMERCE_MIGRATION_PRD.md` (a migration
@@ -55,8 +60,9 @@ the exact claimed-vs-derived evidence attached — never a bare claim, and never
   flag in a database, and `settle`/`settle_with_stepup` *consume* it — the replay guard is structural
   (there is nothing left to check once the object is gone), not a flag someone forgot to set.
 - **Intercepta** is the one live, real-time payment-risk screening call in the stack — the piece that
-  answers "is this claimed address independently known to be bad," as opposed to "does it match our
-  own records."
+  answers "is the payee this invoice claims to be independently known to be bad," as opposed to "does
+  it match our own records." It screens the payee's claimed EVM identity, before the payout-address
+  hold, so a sanctioned payee is refused rather than held for a human.
 - **World (ID for Agents)** is the fresh-human-presence check for exactly the moment `holdOnMismatch`
   fires — proof that a live human, not a replayed session or a compromised backend, is the one clearing
   the hold.
@@ -71,8 +77,11 @@ The real current tree (read directly, not guessed):
 packages/
   seam/               Shared types (Proposal, Verdict, ReasonCode, PolicyArtifact, Premise) + fixed-point money math
   enforcer/           The refusal/hold decision engine — enforce(), five steps, zero chain/adapter dependency
-  dispatcher/         Routes a policy's premise to the adapter that owns it; canonicalHash/computeLogRef; createEnforceDeps
-  issuer-oracle/      Vendor-master truth (disclosed stand-in) + the older ticket/ecomm fixtures (kept, demoted)
+  dispatcher/         Routes a policy's premise to the adapter that owns it; canonicalHash/computeLogRef; createEnforceDeps;
+                      bindClaimArgs; failClosedTable
+  issuer-oracle/      Vendor-master truth: disclosed fixture (default) or Xero (sources/xero.ts); the bank-change change log;
+                      the older ticket/ecomm fixtures (kept, demoted)
+  sui-settlement/     Real Sui settlement for a verdict: settleCleared, settleWithStepUp, commitPolicy, readPolicyHash, readVaultSpent
   intercepta-adapter/ Live Intercepta (Web3 Antivirus) HTTP client + the resolvePremise adapter side
   world-agents/       World ID for Agents OIDC step-up flow + the proposal-scoped step-up gate
   villain-corpus/     The spoofed-invoice BEC demo artifact + three real, no-mock enforce() outcomes
@@ -85,7 +94,9 @@ move/
   tests/                   12 Move unit tests
   DEPLOYMENTS.md           Public on-chain ids; abandoned + current deployments, both recorded
 apps/
-  console/            Invoice Inbox demo app (Next.js) — lib/enforce-deps.ts is its one composition point
+  console/            Invoice Inbox demo app (Next.js) — lib/enforce-deps.ts is its one composition point;
+                      lib/ap-policy.ts (the one AP-agent policy); lib/payment.ts (verdict → Sui payout);
+                      lib/settlement-ledger.ts (settle-once)
 docs/
   THREATMODEL.md      What is/isn't built, dated scope-cut log (CLAUDE.md rule 6)
   VERIFY_FINDINGS.md  Primary-source [VERIFY] research for every sponsor API
@@ -276,6 +287,23 @@ export function createEnforceDeps(registry: SchemaRegistry, extras: {
 resolves `null` (the enforcer's existing "unresolvable" contract), otherwise it calls the field
 function with `def.args ?? []` spread in order.
 
+Two opt-in wrappers were added for the one-policy-per-agent console:
+
+```ts
+export function bindClaimArgs(resolvePremise: EnforceDeps['resolvePremise'], proposal: Pick<Proposal, 'premises'>): EnforceDeps['resolvePremise']
+export function failClosedTable(schema: string, table: SchemaFieldTable, onFailure: (f: ResolveFailure) => void): SchemaFieldTable
+```
+
+- `bindClaimArgs` replaces a `claim:<premiseId>` arg with that proposal's claimed value for the named
+  premise. `BondedRegistry` holds one policy hash per agent, so a committed policy can't hard-code a
+  per-invoice screening subject; this lets it say "screen whatever payee identity this proposal
+  claims." No claim, or more than one, resolves `null` without calling the adapter.
+- `failClosedTable` wraps every field function of a table so a throw becomes `null` (→ `REFUSED` /
+  `PREMISE_UNRESOLVABLE`), after handing the error to `onFailure`. `@bonded/intercepta-adapter`
+  deliberately throws on a missing key or HTTP error; the console and the MCP tool wrap
+  `intercepta-risk` with this and surface the errors as `screeningErrors`. Nothing is dropped silently
+  and no screen result is invented.
+
 **Why this package owns `canonicalHash`, and why every caller must use this exact implementation:**
 `bonded_registry.move`'s `commit_policy` stores an opaque `vector<u8>` that Move compares only for
 byte-equality — there is no on-chain-enforced hash scheme to conform to (confirmed by reading the
@@ -286,8 +314,9 @@ commitment (console, mcp-server, villain-corpus) imports and calls this exact fu
 "reasonable" canonicalizations of the same object produce different bytes and would trip
 `STALE_POLICY` spuriously, or worse, silently agree on one shape and silently diverge on the next.
 
-**Tests:** 13, all passing, including a real end-to-end test wiring `issuerOracleVendors` (no mocks)
-to prove the BEC mismatch resolves through the real router, not only through hand-rolled test doubles.
+**Tests:** 21, all passing, including a real end-to-end test wiring `issuerOracleVendors` (no mocks)
+to prove the BEC mismatch resolves through the real router, not only through hand-rolled test doubles,
+and tests that `failClosedTable` records every converted error.
 
 ---
 
@@ -301,25 +330,56 @@ NetSuite, a bank's own beneficiary registry, etc.) would tell an AP-automation e
 production. It is not a live feed from any real vendor-master or ERP system, and it is never described
 as one anywhere in this codebase."
 
-Three seeded vendors, ids stable across every downstream package:
+Four seeded vendors, ids stable across every downstream package:
 
 | Vendor id | Status | Payout address | Invoice amount | Scenario |
 |---|---|---|---|---|
-| `vnd-acme-supplies` | `active` | old (>1yr) `payoutAddressLastChangedAt` | $1,250.00 | Clean — `CLEARED`/`OK` |
-| `vnd-globex-freight` | `active` | changed **3 days** before baseline (a real, legitimate bank change) | $8,450.00 | Villain-corpus fabricates a *different* fraudulent claim against this same vendor id — this fixture states only the truth |
+| `vnd-acme-supplies` | `active` | old (>1yr) `payoutAddressLastChangedAt` | $1,250.00 | Clean — `CLEARED`/`OK`, paid automatically |
+| `vnd-globex-freight` | `active` | changed **3 days** before baseline (a real, legitimate bank change) | $8,450.00 | Both the spoofed invoice and a genuine bank change are claimed against this vendor id — this fixture states only the truth |
 | `vnd-suspended-corp` | `suspended` | n/a to the scenario | $4,200.00 | Hard-refuse regardless of what's claimed |
+| `vnd-halcyon-machining` | `active` | old | $15,000.00 | Every fact matches, but over the $10,000 irreversible threshold — `HELD_FOR_STEPUP` / `IRREVERSIBLE_UNCONFIRMED` |
 
 ```ts
 export interface VendorTruth {
   vendorId: string; legalName: string; payoutAddress: `0x${string}`;
   invoiceAmountUSD: string; status: 'active' | 'suspended'; payoutAddressLastChangedAt: number;
+  evmAddress: `0x${string}`;   // registered 20-byte EVM identity, for SCREENING, not settlement
 }
 export async function fetchVendorTruth(vendorId: string): Promise<VendorTruth | null>
+export function createVendorSource(env?: NodeJS.ProcessEnv, options?: { changeLogPath?: string }): VendorSource
 ```
 
-`issuerOracleVendors` (in `schemas.ts`) exposes `vendor.payoutAddress` / `vendor.status` as plain
-strings (categorical, compared via `op: 'eq'`), and `vendor.invoiceAmountUSD` /
-`vendor.payoutAddressLastChangedAt` as `bigint` (money/timestamp, never a native `number`).
+`evmAddress` exists because Intercepta screens EVM addresses and every `payoutAddress` is a 32-byte
+Sui address (§6b). The seeded values are synthetic (first 20 bytes of
+`sha256("bonded-synthetic-evm-identity:<vendorId>")`) and were checked absent from the OFAC SDN list
+when chosen.
+
+`issuerOracleVendors` (in `schemas.ts`) exposes `vendor.payoutAddress` / `vendor.status` /
+`vendor.evmAddress` as plain strings (categorical, compared via `op: 'eq'`), and
+`vendor.invoiceAmountUSD` / `vendor.payoutAddressLastChangedAt` as `bigint` (money/timestamp, never a
+native `number`). `vendorTruthFields(source)` builds the same table over any `VendorSource`.
+
+**Source selection.** `createVendorSource` reads `VENDOR_MASTER_SOURCE=fixture|xero`; `fixture` is the
+default.
+
+- **Fixture mode** optionally overlays an append-only change log
+  (`.data/vendor-master-changes.json`, `vendor-master-changes.ts`) holding World-approved bank changes.
+  Each entry records the World `sub`, `authTimeMs` and `proposalHash`, and is compare-and-set against
+  the current address under a file lock. It is part of the disclosed stand-in, not an ERP.
+- **Xero mode** (`sources/xero.ts`) reads a real Xero organisation over the Accounting API, using a
+  Custom Connection (client-credentials; free against the Xero Demo Company). Mapping: `vendorId` ←
+  `ContactNumber`; `payoutAddress` and `evmAddress` ← the supplier's `BankAccountDetails` in the
+  format `bonded:v1;sui=0x<64 hex>;evm=0x<40 hex>` (Xero has no wallet field, and bank details are the
+  field a BEC attacker asks AP to change); `status` ← `ContactStatus` (ARCHIVED / GDPRREQUEST →
+  `suspended`); `invoiceAmountUSD` ← the latest AUTHORISED USD ACCPAY bill's `Total`, via integer
+  string math. Xero has no bank-detail-change timestamp, so `payoutAddressLastChangedAt` ←
+  `UpdatedDateUTC` (last contact update), which errs toward more holds. Anything that doesn't fit
+  throws `XeroDataError`; nothing falls back to the fixture. `xero:setup` seeds the Demo Company from
+  the fixture and reads it back; `xero:check` reads it back only. Re-running `xero:setup` writes the
+  fixture values again, which reverts an approved bank change. **It has not run live; it needs Xero
+  credentials.**
+- `createVendorMasterBankChangeWriter` (`sources/bank-change.ts`) writes an approved bank change to
+  whichever source is active (Xero `BankAccountDetails`, or the fixture change log).
 
 The older `tickets-fixture.ts` (`evt-tokyo-showcase`, `evt-osaka-arena`, `evt-cancelled-fest`) and
 `ecomm-fixture.ts` (`prod-camera-x200`, `prod-headphones-acme`, `prod-sneakers-zeta`) — from the
@@ -327,7 +387,9 @@ scalper-ticket and bait-and-switch-checkout villain scenarios of the earlier, su
 remain in the package, tested, and exported (`issuerOracleTickets`, `issuerOracleEcomm`). They are
 "also demonstrated," not the primary narrative and not deleted.
 
-**Tests:** 29, all passing.
+**Tests:** 78 across 3 suites (`issuer-oracle.test.ts`, `vendor-master-changes.test.ts`,
+`xero.test.ts`), all passing. The Xero tests exercise the mapping and error paths without a live Xero
+call.
 
 ### 6b. Intercepta (`packages/intercepta-adapter`) — real, live risk API
 
@@ -344,16 +406,35 @@ scanToken(tokenAddress, chainId, options?) → { result: TokenRiskAnalysisRespon
 scanMessage(payload, options?) → { result: SignatureAnalysisResponse; evidence: ScanEvidence }
 ```
 
-**The Sui-address limitation, stated plainly, not glossed over:** Intercepta's address-scan endpoints
-take "an ETH address/ENS" (the documented parameter description) — a 20-byte EVM address or a
-lowercase ENS name. `parseScreeningSubject` in `client.ts` actively **rejects** a 32-byte Sui address
-before any network call is made, with an explanatory error naming exactly why. This is not a bug to
-fix quietly; it is a real, structural gap between the settlement chain this project uses (Sui) and the
-chain family Intercepta screens (EVM). See §11 for the concrete consequence and §12 for what a
-production fix looks like, and see `sponsers.md`'s Intercepta section for the full caveat.
+**What gets screened: the payee's claimed EVM identity, not the Sui payout address.** Intercepta's
+address-scan endpoints take "an ETH address/ENS" (the documented parameter description) — a 20-byte
+EVM address or a lowercase ENS name. `parseScreeningSubject` in `client.ts` still **rejects** a 32-byte
+Sui address before any network call. So each invoice claims an EVM identity for the payee, and that
+is what is screened. The console's policy (`apps/console/lib/ap-policy.ts`), per screened vendor, in
+order:
 
-`resolvePremise` exposes only the fields that are already numeric in Intercepta's own documented
-schema (`toxicScore`, trait/detector counts, token `riskScore`) as `bigint`. Categorical fields
+1. `intercepta-risk` / `payment.payTo.traitCount lte 0`, subject `claim:p-<vendor>-evm-identity`
+   (bound by `bindClaimArgs`, §5). `traitCount` is the length of Deep Scan's documented `traits[]`;
+   any trait (`sanction_address`, `known_scammer`, `mixer_transfers`, ...) is a hard `REFUSED`. No
+   `toxicScore` threshold is set, since its range is undocumented.
+2. `vendor.status eq`, hard refuse.
+3. `vendor.evmAddress eq`, hard refuse: the claimed identity must equal the registered one.
+4. `vendor.payoutAddress eq`, `holdOnMismatch: true`, last — so a hold is only reached after every hard
+   check passed, and a sanctioned payee is refused, never held for a human who might approve it.
+
+The spoofed invoice claims a real OFAC-listed address: Lazarus Group
+`0x098b716b8aaf21512996dc57eb0615e2383e2f96`, SDN entry 27307, program DPRK3, added 2022-04-14 (Tornado
+Cash addresses were not used; OFAC delisted them on 2025-03-21). The screen is wrapped in
+`failClosedTable`, so without `INTERCEPTA_API_KEY` these invoices are `REFUSED` /
+`PREMISE_UNRESOLVABLE`, with the key error in `screeningErrors`. **The screen has not run live yet.**
+
+**The remaining caveat:** the screen checks the identity the payee *claims*, not the Sui address the
+money goes to. The link is asserted by the invoice, backed by premise 3 above, and settlement always
+pays the vendor master's Sui address, never the claim (§7). It is not a cryptographic proof that the
+EVM identity controls the Sui address. See `sponsers.md`'s Intercepta section.
+
+The adapter's `interceptaRisk` table exposes only the fields that are already numeric in Intercepta's
+own documented schema (`toxicScore`, trait/detector counts, token `riskScore`) as `bigint`. Categorical fields
 (`riskLevel`, `category`, `trust`, `action`, `riskGroup`) are deliberately **not** exposed through this
 bigint-only surface — inventing an ordinal encoding for a string enum (deciding `high` = `3n`, say)
 would be exactly the kind of guessed severity threshold this project's `[VERIFY]` discipline forbids.
@@ -418,6 +499,40 @@ cap-gating (`enforcer_cap_holder_can_mint_a_verdict`, `attacker_without_the_cap_
 (`a_settled_verdict_object_id_cannot_be_fetched_again`), and the registry's forward-only-overwrite
 behavior.
 
+### 7a. Automatic settlement (`packages/sui-settlement`, `apps/console/lib/payment.ts`)
+
+`@bonded/sui-settlement` submits the real settlement for an `enforce()` verdict by shelling out to
+`sui client ptb ... --json` (signed by the Sui CLI keystore; TypeScript never reads key bytes) and
+reads every result back over gRPC. It exports `settleCleared` (mint a `CLEARED` verdict + `settle`,
+one PTB), `settleWithStepUp` (verdict + `StepUpApproval` + `settle_with_stepup`; refuses hand-built,
+uncertified, denied, stale or wrong-proposal approvals before any CLI call), `commitPolicy`,
+`readPolicyHash` and `readVaultSpent`. The recipient always comes from `deriveVendorRecipient`, which
+re-derives it from the vendor master; the claim's address is never paid.
+
+The console closes the loop. `POST /api/enforce` reads `onchainPolicyHash` from `BondedRegistry`
+(never recomputed locally; a failed read or missing hash is a visible `OnchainPolicyError`), uses the
+vault's real `spent_this_period` as `sumRecentSpend`, runs `enforce()`, and on `CLEARED` calls
+`settleCleared`. A settle-once ledger (`.data/console/settlements.json`, keyed by `proposalHash`) makes
+each invoice pay at most once: the on-chain `Verdict` is deleted on settle, but nothing on-chain stops
+a *fresh* verdict for an already-paid proposal. A settlement that fails where a transaction may
+already have been submitted is recorded `unknown` and left for manual review, never retried
+automatically.
+
+**One AP-agent policy.** `BondedRegistry` holds one hash per agent, so every console invoice is
+enforced against one committed `PolicyArtifact` (`ap-policy.ts`): per-vendor premise ids, no vendor
+fact embedded in any premise `value` (so a bank change doesn't change the hash), `irreversibleAboveUSDC`
+$10,000, budget max $100,000 with period labelled `vault-lifetime`, because `spent_this_period` never
+resets on-chain.
+
+**Live, on testnet** (every digest in `move/DEPLOYMENTS.md`'s auto-settlement sections): the one-AP
+policy committed (`8AVk9pGcPovuftPwsHqkiQUCxcTHp2uxZFnQw8LxzVh`); the vault topped up by minting
+USDSUI through its `TreasuryCap` via `0x2::coin::mint` + `fund_vault`; and acme paid through the
+console route, digest `BkuSQ6nhyEXBXvGs9X3kiX3WVgTkPZ9HAkEdNgDqwP69` (1,250,000,000 base units to
+`0x4d5a…d3e0`). A second identical POST returned the same digest with `alreadySettled: true` and paid
+nothing. **`settleWithStepUp` has not run live; it needs World credentials.**
+
+**Tests (`@bonded/sui-settlement`):** 58 across 4 suites, all passing, with no live chain call.
+
 ---
 
 ## 8. Identity / step-up (`packages/world-agents`)
@@ -451,6 +566,21 @@ Single-use enforcement (state lookup, code-hash replay, attempt TTL) happens in 
 update **before** a code is ever sent to the token endpoint, so a duplicated callback can never reach
 the IdP twice and a replayed/leaked code is refused without a network call at all.
 
+**What an approval does in the console** (`apps/console/lib/payment.ts`'s `completeStepUp`, which
+re-derives the verdict first and certifies the approval with `approveStepUpForSettlement` over the
+real `decideStepUp`):
+
+- `IRREVERSIBLE_UNCONFIRMED` (the $15,000 halcyon invoice) → `settleWithStepUp`, paying the address on
+  file.
+- `PREMISE_HELD_FOR_REVIEW` on the payout premise (a bank change) → the approval does **not** pay the
+  claimed address. It writes the confirmed new address to the vendor master (Xero
+  `BankAccountDetails`, or the fixture change log), re-runs `enforce()`, and the now-matching invoice
+  clears and pays the updated truth (or, if it's also over the threshold, settles with the same fresh
+  approval).
+
+**None of this has run live: there are no World sandbox credentials yet.** Without them
+`/api/stepup` answers a visible 501 naming the three missing variables.
+
 **Tests:** 59, across `flow.test.ts`, `stepup-gate.test.ts`, and `world-jwks.test.ts` (the latter
 fetches the *real* live JWKS, reads its real key id, and confirms `verifyIdToken` rejects a token
 signed with a different key under that same real `kid` — exercising jose's actual cryptographic check
@@ -467,7 +597,10 @@ Remittance Details" email impersonating `Globex Freight & Logistics Inc.` (the s
 `vnd-globex-freight` fixture record), sent from a lookalike domain
 (`globex-freight-payments.com`), claiming a fraudulent payout address
 (`0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187`) embedded in the markup as
-`#fraudulent-payout-address[data-address]`. The page's own red-flags section and its "$3.04 billion"
+`#fraudulent-payout-address[data-address]`, and a claimed payee EVM identity embedded as
+`#claimed-evm-identity[data-address]`: the real OFAC-listed Lazarus Group address
+`0x098b716b8aaf21512996dc57eb0615e2383e2f96` (SDN entry 27307, DPRK3, added 2022-04-14), explained
+on the page. The page's own red-flags section and its "$3.04 billion"
 context box cite the same real IC3 figure as this document. A disclosure banner at the top states
 plainly that this is a synthetic BEC test artifact, not a real invoice.
 
@@ -485,39 +618,57 @@ anywhere) in three scenarios:
 | 2 | `vnd-suspended-corp` | `active` status (the vendor is actually `suspended`) | `REFUSED` / `PREMISE_MISMATCH` |
 | 3 | `vnd-acme-supplies` | The correct, matching payout address and status | `CLEARED` / `OK` |
 
-An optional fourth scenario screens the fraudulent address through the real
-`@bonded/intercepta-adapter`, gated on `INTERCEPTA_API_KEY` — if the key is absent, this is a visible,
-recorded "not run: missing key" status, never a silent skip; and even with a key present, this
-scenario is **expected to fail** for a structural reason: the fraudulent address is 32-byte Sui-shaped,
-and Intercepta's address endpoints reject anything that isn't a 20-byte EVM address or ENS name before
-any network call is made (see §6b). The harness writes its own `packages/villain-corpus/results.json`
-(structurally similar to, but entirely separate from, the frozen `packages/attack-corpus/results.json`
-— that package is never touched).
+The three core scenarios are key-free by design (no screen premise), so scenario 1 shows the
+payout hold on its own. A key-gated fourth scenario (`runInterceptaScreenScenario`) runs the full
+globex policy: it screens the EVM identity the spoofed page claims, first, and must `REFUSE`. Without
+`INTERCEPTA_API_KEY` it records a visible "not run: missing key" status, never a silent skip. (This
+replaced an earlier fourth scenario that screened the 32-byte Sui payout address and could never
+succeed, because Intercepta's address endpoints reject anything that isn't a 20-byte EVM address or
+ENS name.) The harness writes its own `packages/villain-corpus/results.json` (structurally similar to,
+but entirely separate from, the frozen `packages/attack-corpus/results.json` — that package is never
+touched).
 
-**Tests:** 4, all passing — the three deterministic outcomes above, run with no live network call,
-plus a check that the fraudulent address embedded in the page is a well-formed, distinct 32-byte hex
-value.
+**Tests:** 9, all passing — the three deterministic outcomes above, checks on the addresses embedded
+in the page, and the key-gated scenario's fail-closed path, all with no live network call.
 
 ### 9b. Console (`apps/console`) — Invoice Inbox
 
 A Next.js app whose one composition point, `lib/enforce-deps.ts`, wires the real
-`@bonded/dispatcher`'s `createEnforceDeps` against the real `issuerOracleVendors` registry and mirrors
-villain-corpus's three scenarios field-for-field (same premise ids, same policy shapes, same proposal
-ids — copied by directly reading `spoofed-invoice.html`, not by importing `@bonded/villain-corpus`,
-which is not in this app's dependency list).
+`@bonded/dispatcher`'s `createEnforceDeps` against the vendor master chosen by `createVendorSource`
+(fixture plus change log, or Xero) and `intercepta-risk` wrapped in `failClosedTable`, with
+`bindClaimArgs` binding screening subjects from each proposal. Every invoice is enforced against the
+one committed AP-agent policy (`lib/ap-policy.ts`, §7a), with `onchainPolicyHash` read from
+`BondedRegistry` and `sumRecentSpend` read from the vault. The spoofed invoice's claims are copied by
+reading `spoofed-invoice.html` (a test fails on drift), not by importing `@bonded/villain-corpus`.
 
-Routes: `app/invoices/page.tsx` (the inbox listing the three demo invoices), `app/api/enforce/route.ts`
-(`POST { invoiceId }` → runs the real `enforce()`, returns the `Verdict` plus the claimed/derived pair
-for **every** premise checked, not only the mismatched one — CLAUDE.md rule 5), `app/invoices/[id]/
-page.tsx` (the premise-diff table + outcome badge), `app/stepup/page.tsx` + `app/api/stepup/route.ts`
-(thin wrappers over `@bonded/world-agents`'s already-built `initiateStepUp`/`handleCallback`/
-`decideStepUp` — no new logic added here; the route never trusts a client-supplied proposal, it always
-re-derives the real verdict from the fixed set of 3 demo invoices before starting a World attempt).
+The five demo invoices (`inv-*`):
+
+| Invoice | Claim | Outcome | Needs |
+|---|---|---|---|
+| `inv-acme-supplies` | correct | `CLEARED` → paid on Sui (live, digest `BkuSQ6nh…wP69`) | nothing |
+| `inv-globex-spoofed` | fraudulent payout address + OFAC-listed EVM identity | `REFUSED` by the screen; fail-closed `REFUSED` / `PREMISE_UNRESOLVABLE` without a key | `INTERCEPTA_API_KEY` for the live screen |
+| `inv-suspended-corp` | claims `active` | `REFUSED` / `PREMISE_MISMATCH` | nothing |
+| `inv-globex-bank-change` | registered EVM identity + genuine new payout address | screen passes → `HELD` / `PREMISE_HELD_FOR_REVIEW` → World approval writes the new address to the vendor master → re-enforced, clears, pays | Intercepta + World keys |
+| `inv-halcyon-machining` | correct, $15,000 | `HELD` / `IRREVERSIBLE_UNCONFIRMED` → World approval → `settleWithStepUp` | Intercepta + World keys |
+
+Routes: `app/invoices/page.tsx` (the inbox), `app/api/enforce/route.ts` (`POST { invoiceId }` → the
+agent proposing payment: runs the real `enforce()`, settles on `CLEARED`, and returns the `Verdict`,
+the claimed/derived pair for **every** premise checked — CLAUDE.md rule 5 — plus `screeningErrors`
+and the settlement status), `app/invoices/[id]/page.tsx` (the premise-diff table, outcome badge and
+settlement), `app/stepup/page.tsx` + `app/api/stepup/route.ts` (thin wrappers over
+`@bonded/world-agents`; the route never trusts a client-supplied proposal and re-derives the real
+verdict before starting a World attempt; the callback goes to `completeStepUp`, §8).
+
+**Known UX caveat:** opening an invoice detail page triggers the agent's `POST /api/enforce`, which
+pays if the verdict is `CLEARED`. The payment is the agent's action (no human-approval button, per
+CLAUDE.md rule 4), and the ledger stops a second payment, but viewing a page does trigger it.
 
 Out of scope by design, stated in the composition file itself: browser-side Sui wallet signing (never
-built, per CLAUDE.md rule 3), auth, multi-tenancy.
+built, per CLAUDE.md rule 3), auth, multi-tenancy. `getCheckpoint` is a unix-seconds stand-in, not a
+Sui checkpoint.
 
-**Tests:** 18, all passing.
+**Tests:** 24, all passing (another change to this suite was in progress in parallel when this was
+counted, so the number may move).
 
 ---
 
@@ -537,7 +688,11 @@ logic of its own** — every decision comes from the same real `enforce()` → `
 `vendor.status` premise (checked first, hard-refuse), a `vendor.payoutAddress` premise
 (`holdOnMismatch: true`), and a `vendor.invoiceAmountUSD` premise (0.5% tolerance, hard-refuse beyond
 that) — documented at length in `src/tools/verify-invoice-payment.ts`'s own header, including why each
-choice was made. Two integration paths are shown side by side in the package README: direct SDK usage
+choice was made. When the caller passes an optional `claimedPayeeEvmAddress`, a fourth premise
+screens it through Intercepta (`payment.payTo.traitCount lte 0`, hard refuse, fail-closed via
+`failClosedTable`), ordered after status and before the payout hold. Unlike the console policy, the
+MCP tool has no separate registered-identity match premise. The MCP tool returns a verdict only; it
+does not settle. Two integration paths are shown side by side in the package README: direct SDK usage
 (`import { enforce } from '@bonded/enforcer'`, or even more directly `import { verifyInvoicePayment }
 from '@bonded/mcp-server'`) versus adding it as an agent tool (`claude mcp add bonded-mcp -- node
 ./packages/mcp-server/dist/server.js`).
@@ -549,29 +704,34 @@ from '@bonded/mcp-server'`) versus adding it as an agent tool (`claude mcp add b
 
 ## 11. Testing matrix — real, observed counts
 
-Run directly against this repository on 2026-09-26 (`pnpm --filter <name> test` for every TypeScript
-package, `sui move test` inside `move/`). These are the actual numbers observed, not carried over from
-an earlier document:
+Re-run directly against this repository on 2026-09-26 for this revision (`pnpm --filter <name> test`
+for every TypeScript package, `sui move test` inside `move/`). These are the actual numbers observed,
+not carried over from an earlier document:
 
 | Package | Test suites | Tests | Result |
 |---|---|---|---|
 | `@bonded/seam` | 2 | 20 | all passing |
 | `@bonded/enforcer` | 3 | 41 | all passing |
-| `@bonded/dispatcher` | 1 | 13 | all passing |
-| `@bonded/issuer-oracle` | 1 | 29 | all passing |
+| `@bonded/dispatcher` | 1 | 21 | all passing |
+| `@bonded/issuer-oracle` | 3 | 78 | all passing |
 | `@bonded/intercepta-adapter` | 1 | 46 | all passing |
 | `@bonded/world-agents` | 3 | 59 | all passing |
-| `@bonded/villain-corpus` | 1 | 4 | all passing |
-| `@bonded/mcp-server` | 1 | 6 | all passing |
-| `@bonded/console` | 1 | 18 | all passing |
+| `@bonded/sui-settlement` | 4 | 58 | all passing |
+| `@bonded/villain-corpus` | 1 | 9 | all passing |
+| `@bonded/mcp-server` | 1 | 12 | all passing |
+| `@bonded/console` | 1 | 24 | all passing (a parallel change to this suite was in progress; the count may move) |
 | `move/` (`sui move test`) | — | 12 | all passing |
-| **Total** | | **236 TS tests + 12 Move tests = 248** | |
+| **Total** | | **368 TS tests + 12 Move tests = 380** | |
 
-Every one of these suites runs with no live sponsor API key required (Intercepta's client is fully
-unit-tested against strict response-shape validation with no live call; World's tests hit the real
-JWKS/discovery endpoints read-only but never require a registered client secret; the villain-corpus
-harness's optional live-Intercepta scenario is explicitly excluded from its test suite and only runs
-via `tsx harness/run.ts` when a key is present).
+Every one of these suites runs with no live sponsor API key, no Xero credentials and no chain write
+(Intercepta's client is unit-tested against strict response-shape validation with no live call, and
+the key-free fail-closed paths are tested directly; the Xero tests use an injected fetch, and the
+Sui settlement tests cover argument building, config and step-up gating without submitting anything,
+with the live proof recorded in `move/DEPLOYMENTS.md` instead; the
+villain-corpus harness's live-Intercepta scenario only runs via `tsx harness/run.ts` with a key).
+World's tests do hit the real sandbox JWKS/discovery endpoints read-only. That sandbox has been slow
+from this machine (around 3–11 s against a 10 s timeout), so an occasional world-agents timeout is a
+network issue, not a code failure; on this run all 59 passed.
 
 ---
 
@@ -579,12 +739,13 @@ via `tsx harness/run.ts` when a key is present).
 
 | Sponsor | Real, live integration | Package(s) |
 |---|---|---|
-| **Sui** | On-chain settlement objects, deployed and smoke-tested on testnet; object-capability replay guard | `move/`, package `0xf3d914b3…bf57a` |
-| **Intercepta** | Live Web3 Antivirus HTTP client, no mocks, no cache, sha256 evidence storage | `packages/intercepta-adapter` |
-| **World** | Live OIDC sandbox relying-party flow, real JWKS verification, proposal-scoped step-up | `packages/world-agents` |
+| **Sui** | On-chain settlement objects, deployed on testnet; object-capability replay guard; automatic payout from the console on `CLEARED`, run live (acme, `BkuSQ6nh…wP69`) | `move/`, package `0xf3d914b3…bf57a`; `packages/sui-settlement`; `apps/console/lib/payment.ts` |
+| **Intercepta** | Live Web3 Antivirus HTTP client, no mocks, no cache, sha256 evidence storage; screens the payee's claimed EVM identity, fail-closed. **Not yet run live (no key)** | `packages/intercepta-adapter`; `apps/console/lib/ap-policy.ts` |
+| **World** | Live OIDC sandbox relying-party flow, real JWKS verification, proposal-scoped step-up that gates `settleWithStepUp` and bank-change approval. **Not yet run end to end (no client credentials)** | `packages/world-agents`; `apps/console/lib/payment.ts` |
 
 See `sponsers.md` for what each sponsor is, why it was chosen, exactly where it's implemented, what
-would break without it, and — for Intercepta specifically — the honest Sui-address caveat.
+would break without it, and — for Intercepta specifically — what the claimed-identity screen does and
+doesn't prove.
 
 ---
 
@@ -593,25 +754,25 @@ would break without it, and — for Intercepta specifically — the honest Sui-a
 Stated here, consistent with `docs/THREATMODEL.md`'s own dated entries — nothing below is a gap
 discovered by a reviewer that this document tries to hide:
 
-- **The issuer-oracle is a disclosed, controlled fixture**, not a live vendor-master/ERP feed. Its own
-  file header says so before any code in it runs. A production deployment replaces `TRUTH` (the
-  in-memory map) with a real call to a real vendor-master/ERP system (SAP, NetSuite, a bank's own
-  beneficiary registry); `fetchVendorTruth`'s async, one-id-in/one-record-out signature does not
-  change when that swap happens.
-- **Intercepta cannot screen this project's Sui-shaped payout addresses.** Confirmed by reading the
-  documented parameter description ("ETH address/ENS") and enforced structurally in code
-  (`parseScreeningSubject` rejects a 32-byte Sui address before any network call). This is not a bug;
-  it is a real mismatch between the settlement chain (Sui) and the chain family Intercepta screens
-  (EVM). See `sponsers.md`'s Intercepta section for the full caveat and the production fix.
-- **`enforce()`'s output is not wired to a real on-chain `settle()` call.** Confirmed by reading the
-  actual current `apps/console/lib/enforce-deps.ts` and `packages/mcp-server/src/tools/
-  verify-invoice-payment.ts`: neither imports a Sui SDK, neither calls `settle`/`settle_with_stepup`,
-  and both explicitly document that their `getCheckpoint()` is a unix-timestamp stand-in, not a real
-  Sui checkpoint. `move/`'s settlement layer is deployed, smoke-tested, and unit-tested
-  independently — but the TypeScript enforcement layer and the Move settlement layer are not yet
-  connected by a real transaction-building call from either app. This is the single largest remaining
-  gap before an end-to-end, on-chain demo is possible, and it is named as such in
-  `docs/THREATMODEL.md`, not discovered here for the first time.
+- **None of the Intercepta, World or Xero flows has run live.** Each needs keys (listed in
+  `README.md`): `INTERCEPTA_API_KEY`; `WORLD_SANDBOX_CLIENT_ID` / `_SECRET` / `WORLD_REDIRECT_URI`;
+  `VENDOR_MASTER_SOURCE=xero` with `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET`. Until then the globex
+  bank-change and halcyon invoices can't complete, `settleWithStepUp` hasn't run on-chain, and whether
+  Deep Scan actually returns a trait for the Lazarus address is unconfirmed.
+- **The vendor master is still the disclosed, controlled fixture by default**, not a live ERP feed. Its
+  own file header says so. The Xero connector is the production-shaped swap, behind the same
+  `VendorSource` signature, but is opt-in and unrun.
+- **Intercepta screens the identity the payee claims, not the Sui address the money goes to.** The
+  link is asserted by the invoice, backed by a hard-refuse premise that the claimed identity equals the
+  vendor's registered one; settlement always pays the vendor-master address. It is not a
+  cryptographic link between the EVM identity and the Sui address.
+- **The World identity isn't linked to a Sui account.** The step-up proves a fresh human for one
+  proposal; it doesn't bind that human to an on-chain address.
+- **The budget is vault-lifetime, not periodic**, because `spent_this_period` never resets on-chain.
+- **Opening an invoice detail page triggers the agent's POST**, which pays if `CLEARED`. A settlement
+  whose outcome is unknown is left for manual review, never retried automatically.
+- **`getCheckpoint()` is a unix-timestamp stand-in, not a Sui checkpoint**, in both the console and
+  the MCP tool; `Verdict.blockChecked` is never shown as a checkpoint.
 - **`site/spoofed-invoice.html` is not hosted anywhere public yet.** It is a complete, real static
   file, referenced by its own provenance footer as "not deployed anywhere yet" — a Vercel/GitHub Pages
   deployment is a real next step, not done.
@@ -620,9 +781,10 @@ discovered by a reviewer that this document tries to hide:
   fixtures — a disclosed scope limit, not a gap silently filled by guessed logic.
 - **`toxicScore`'s and Scan Token's `riskScore`'s numeric ranges are undocumented by Intercepta
   itself** (confirmed by reading the live OAS — no min, max, or direction is published for either).
-  No "high risk" threshold is invented anywhere in this codebase; the raw integer is passed straight
-  through, and any policy that wants to threshold on it needs a real keyed call against known-risk
-  addresses first to learn what the scale actually means.
+  No "high risk" threshold is invented anywhere in this codebase; the screen uses the documented
+  trait count instead, and any policy that wants to threshold on a score needs a real keyed call
+  against known-risk addresses (Intercepta's pinned Discord test addresses) first to learn what the
+  scale actually means.
 
 ---
 

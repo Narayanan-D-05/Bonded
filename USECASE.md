@@ -63,9 +63,13 @@ $8,450 and doesn't find out until the real Globex asks where its money is, weeks
 
 1. The agent proposes the payment and states what it believes: *pay Globex, at this address, this
    amount*.
-2. Bonded doesn't trust that claim. It looks up Globex's real payout address in the vendor master
-   record, a source the email can't touch, and compares the two.
-3. The addresses don't match. Because this check is marked `holdOnMismatch`, the verdict is
+2. Bonded doesn't trust that claim. First it screens the payee identity the invoice claims through
+   Intercepta. If that identity carries any documented risk trait (sanctions, known scammer, mixer
+   use), the payment is refused outright and never reaches a human. In our demo's spoofed invoice
+   it does: the email claims a real OFAC-listed Lazarus Group address. It also checks that the
+   claimed identity matches the one registered for Globex.
+3. Then Bonded looks up Globex's real payout address in the vendor master record, a source the email
+   can't touch, and compares the two. The addresses don't match. Because this check is marked `holdOnMismatch`, the verdict is
    `HELD_FOR_STEPUP`, not `REFUSED` and not `CLEARED`. The payment doesn't go out.
 4. Sam gets the held payment with the evidence side by side: the claimed address, the address on
    file, and when the one on file last changed.
@@ -74,10 +78,12 @@ $8,450 and doesn't find out until the real Globex asks where its money is, weeks
 6. **Fraud branch:** Globex says they never changed banks. Sam denies the payment. Nothing moved, and
    Kestrel has a real attack to report.
    **Legitimate branch:** Globex confirms the change. Sam completes a fresh World ID check, which
-   proves a live human approved this one payment, not a reused login or a script. The payment can
-   then be released.
-7. On Sui, the release happens as a one-use object: the verdict and the approval are consumed in the
-   same transaction and can never be settled a second time.
+   proves a live human approved this change, not a reused login or a script. The approval doesn't
+   pay the address in the email. It updates Globex's vendor master record with the confirmed new
+   address, and Bonded re-checks the invoice against the updated record.
+7. The invoice now matches, clears, and is paid on Sui automatically, to the address on file. The
+   verdict is a one-use object, consumed when it settles, and Bonded's ledger pays each invoice at
+   most once.
 
 **The result:** of Kestrel's 400 monthly payments, the few dozen routine ones per vendor go through
 with no human at all. A person is involved only in the handful of genuinely ambiguous moments, and
@@ -100,10 +106,10 @@ only when they can't be faked.
 
 ## What each sponsor does in this story
 
-- **Intercepta:** screens the new payout address against live threat intelligence, adding "this
-  address is independently known to be bad" to "this address doesn't match our records". *(Currently
-  limited: Intercepta screens EVM addresses, and this demo's addresses are Sui-shaped. See
-  `sponsers.md`.)*
+- **Intercepta:** screens the payee's claimed EVM identity against live threat intelligence before
+  anything else, so a sanctioned or known-bad payee is refused rather than held for a human who
+  might approve it. *(Caveat: it screens the identity the invoice claims, not the Sui address the
+  money goes to; the claimed identity must match the one on file. See `sponsers.md`.)*
 - **World ID:** proves Sam is a live human approving this specific payment right now. That's the one
   step an attacker most wants to fake.
 - **Sui:** holds the funds and makes each approval single-use. A cleared verdict is an object that is
@@ -130,16 +136,22 @@ impossible to replay.
 ## What's built today, honestly
 
 **Built and tested:**
-- this exact Globex scenario, end to end, including the spoofed email page, the three verdicts and
-  the hold;
+- this Globex scenario, including the spoofed email page, the Intercepta screen of the claimed
+  identity (fail-closed without a key), the hold, and the bank-change approval that updates the
+  vendor master before paying;
 - the console, where Sam's review screen is the Invoice Inbox;
+- automatic payout on Sui: a `CLEARED` invoice is paid to the vendor-master address, once. This ran
+  live on testnet for the acme invoice;
+- a Xero connector, so the vendor master can be a real accounting system instead of the fixture;
 - the MCP tool and SDK;
 - the World ID step-up;
 - the Sui vault, live on testnet.
 
 **Not yet:**
-- a `CLEARED` or approved verdict doesn't automatically submit the Sui settlement yet;
-- the vendor master is a disclosed stand-in, not a real ERP connection;
-- Intercepta can't screen the Sui-shaped demo addresses.
+- the Intercepta screen, the World step-up (and so the step-up payout) and the Xero connector haven't
+  run live; each needs keys (listed in `README.md`);
+- the vendor master is still the disclosed stand-in by default;
+- Intercepta checks the identity the payee claims, not the Sui address the money goes to;
+- the spoofed-invoice page isn't hosted publicly.
 
-See `docs/THREATMODEL.md` for all three.
+See `docs/THREATMODEL.md` for all of these.

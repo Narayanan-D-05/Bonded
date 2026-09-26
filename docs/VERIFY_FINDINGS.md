@@ -320,6 +320,7 @@ Sources: the reference pages at https://docs.web3antivirus.io/reference/quick-sc
   - Message `riskGroup`: bands `Low/Medium/High`.
   - Settling the `toxicScore` range needs one live keyed call. Until then, `riskToStakeMultiplierBps` must not assume a scale.
 - The local file `docs/reference/intercepta-api-docs.md` is mostly x402 quickstart text and contains no Web3 Antivirus response examples.
+- **Note added 2026-09-26 (later), after the build moved on; the findings above are unchanged.** Because the address endpoints take "ETH address/ENS", the build now screens the payee's *claimed EVM identity* (`VendorTruth.evmAddress`, claimed on the invoice), not the 32-byte Sui payout address. `parseScreeningSubject` still rejects Sui addresses, as before. The premise is `payment.payTo.traitCount lte 0` (any documented trait is a hard refuse), which uses the documented `traits[]` array and avoids the undocumented `toxicScore` range entirely; no score threshold is set anywhere. The spoofed invoice claims Lazarus Group `0x098b716b8aaf21512996dc57eb0615e2383e2f96` (OFAC SDN entry 27307, DPRK3, added 2022-04-14). What this assumes and has not yet confirmed: that Deep Scan returns at least one trait (e.g. `sanction_address`) for that address. No keyed call has been made yet; it needs `INTERCEPTA_API_KEY`, and the pinned test addresses from Intercepta's Discord are still not on hand. Scan Token and Scan Message are still not used for Sui, for the reasons above.
 
 ---
 
