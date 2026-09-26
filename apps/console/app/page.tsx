@@ -4,6 +4,7 @@ import { buildActivityTimeline, formatUsdc6, summarizeSettlements, type Activity
 import { readDemoLedger, readVendorMasterChangeLog, readVendorRequests } from '../lib/activity-source';
 import type { LedgerEntry } from '../lib/settlement-ledger';
 import { HeroVideo } from '../components/HeroVideo';
+import { SiteFooter } from '../components/SiteFooter';
 import { buttonClass } from '../components/ui/button';
 import { ExternalLink, SuiscanLink } from '../components/ui/ExternalLink';
 import { formatUtc } from '../components/ui/format';
@@ -448,6 +449,7 @@ export default async function OverviewPage() {
           </div>
         </Container>
       </section>
+      <SiteFooter />
     </>
   );
 }

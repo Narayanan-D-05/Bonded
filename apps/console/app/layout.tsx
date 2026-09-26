@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { Bricolage_Grotesque, Instrument_Sans, Instrument_Serif, JetBrains_Mono } from 'next/font/google';
 import { ConsoleFrame } from '../components/ConsoleFrame';
-import { SiteFooter } from '../components/SiteFooter';
 import { SiteNav } from '../components/SiteNav';
 import './globals.css';
 
@@ -45,7 +44,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <main id="main" className="w-full flex-1">
             {children}
           </main>
-          <SiteFooter />
         </ConsoleFrame>
       </body>
     </html>
