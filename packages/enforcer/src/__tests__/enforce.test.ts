@@ -156,6 +156,132 @@ describe('enforce — every ReasonCode branch', () => {
   });
 });
 
+describe('enforce — holdOnMismatch (Commerce Edition B2B/AP correction)', () => {
+  it('a holdOnMismatch premise that mismatches produces HELD_FOR_STEPUP / PREMISE_HELD_FOR_REVIEW, and logMismatch is called with both claimed and derived values', async () => {
+    const deps = makeDeps({ resolvePremise: jest.fn(async () => 99_000_000n) }); // claim says 45000000
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.payoutAddress', op: 'eq', value: '', holdOnMismatch: true }],
+    });
+    const proposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: '45000000' }] });
+
+    const verdict = await enforce(proposal, policy, POLICY_HASH, deps);
+
+    expect(verdict.outcome).toBe(2); // HELD_FOR_STEPUP
+    expect(verdict.reasonCode).toBe(ReasonCode.PREMISE_HELD_FOR_REVIEW);
+    expect(deps.logMismatch).toHaveBeenCalledWith(PROPOSAL_ID, 'p1', '45000000', '99000000');
+  });
+
+  it('regression: the same mismatch with holdOnMismatch unset still hard-refuses', async () => {
+    const deps = makeDeps({ resolvePremise: jest.fn(async () => 99_000_000n) });
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.payoutAddress', op: 'eq', value: '' }],
+    });
+    const proposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: '45000000' }] });
+
+    const verdict = await enforce(proposal, policy, POLICY_HASH, deps);
+
+    expect(verdict.outcome).toBe(1); // REFUSED
+    expect(verdict.reasonCode).toBe(ReasonCode.PREMISE_MISMATCH);
+  });
+
+  it('regression: the same mismatch with holdOnMismatch explicitly false still hard-refuses', async () => {
+    const deps = makeDeps({ resolvePremise: jest.fn(async () => 99_000_000n) });
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.payoutAddress', op: 'eq', value: '', holdOnMismatch: false }],
+    });
+    const proposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: '45000000' }] });
+
+    const verdict = await enforce(proposal, policy, POLICY_HASH, deps);
+
+    expect(verdict.outcome).toBe(1); // REFUSED
+    expect(verdict.reasonCode).toBe(ReasonCode.PREMISE_MISMATCH);
+  });
+
+  it('step order: budget/irreversible checks are never reached after a hold-branch return', async () => {
+    const deps = makeDeps({
+      resolvePremise: jest.fn(async () => 99_000_000n), // mismatches -> hold, must short-circuit
+      sumRecentSpend: jest.fn(async () => {
+        throw new Error('must not be called: a hold-branch return must short-circuit before the budget check');
+      }),
+    });
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.payoutAddress', op: 'eq', value: '', holdOnMismatch: true }],
+    });
+    const proposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: '45000000' }] });
+
+    const verdict = await enforce(proposal, policy, POLICY_HASH, deps);
+
+    expect(verdict.outcome).toBe(2);
+    expect(verdict.reasonCode).toBe(ReasonCode.PREMISE_HELD_FOR_REVIEW);
+    expect(deps.sumRecentSpend).not.toHaveBeenCalled();
+  });
+
+  it('multi-premise ordering: an earlier plain-mismatch premise still wins (hard refuse) over a later holdOnMismatch one', async () => {
+    const deps = makeDeps({
+      resolvePremise: jest
+        .fn<EnforceDeps['resolvePremise']>()
+        .mockResolvedValueOnce(99_000_000n) // p1 (plain) mismatches first
+        .mockResolvedValueOnce(1_000_000n), // p2 (holdOnMismatch) would also mismatch, but never reached
+    });
+    const policy = makePolicy({
+      premises: [
+        { id: 'p1', schema: 'issuer-oracle-tickets', field: 'a', op: 'eq', value: '', toleranceBps: 0 },
+        { id: 'p2', schema: 'issuer-oracle-vendors', field: 'vendor.payoutAddress', op: 'eq', value: '', holdOnMismatch: true },
+      ],
+    });
+    const proposal = makeProposal({
+      premises: [
+        { premiseId: 'p1', claimedValue: '45000000' },
+        { premiseId: 'p2', claimedValue: '45000000' },
+      ],
+    });
+
+    const verdict = await enforce(proposal, policy, POLICY_HASH, deps);
+
+    expect(verdict.outcome).toBe(1); // REFUSED — the earlier plain mismatch wins
+    expect(verdict.reasonCode).toBe(ReasonCode.PREMISE_MISMATCH);
+    expect(deps.resolvePremise).toHaveBeenCalledTimes(1); // never got to p2
+  });
+
+  it('categorical eq premise (string derived) passes and fails correctly through the real string branch', async () => {
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.status', op: 'eq', value: '' }],
+    });
+
+    const passDeps = makeDeps({ resolvePremise: jest.fn(async () => 'active') });
+    const passProposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: 'active' }] });
+    const passVerdict = await enforce(passProposal, policy, POLICY_HASH, passDeps);
+    expect(passVerdict.outcome).toBe(0); // CLEARED
+    expect(passVerdict.reasonCode).toBe(ReasonCode.OK);
+
+    const failDeps = makeDeps({ resolvePremise: jest.fn(async () => 'suspended') });
+    const failProposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: 'active' }] });
+    const failVerdict = await enforce(failProposal, policy, POLICY_HASH, failDeps);
+    expect(failVerdict.outcome).toBe(1); // REFUSED
+    expect(failVerdict.reasonCode).toBe(ReasonCode.PREMISE_MISMATCH);
+    expect(failDeps.logMismatch).toHaveBeenCalledWith(PROPOSAL_ID, 'p1', 'active', 'suspended');
+  });
+
+  it('categorical eq premise with holdOnMismatch: passes and fails correctly through the string branch, held variant', async () => {
+    const policy = makePolicy({
+      premises: [{ id: 'p1', schema: 'issuer-oracle-vendors', field: 'vendor.status', op: 'eq', value: '', holdOnMismatch: true }],
+    });
+
+    const passDeps = makeDeps({ resolvePremise: jest.fn(async () => 'active') });
+    const passProposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: 'active' }] });
+    const passVerdict = await enforce(passProposal, policy, POLICY_HASH, passDeps);
+    expect(passVerdict.outcome).toBe(0); // CLEARED — no mismatch, hold never triggers
+    expect(passVerdict.reasonCode).toBe(ReasonCode.OK);
+
+    const failDeps = makeDeps({ resolvePremise: jest.fn(async () => 'suspended') });
+    const failProposal = makeProposal({ premises: [{ premiseId: 'p1', claimedValue: 'active' }] });
+    const failVerdict = await enforce(failProposal, policy, POLICY_HASH, failDeps);
+    expect(failVerdict.outcome).toBe(2); // HELD_FOR_STEPUP
+    expect(failVerdict.reasonCode).toBe(ReasonCode.PREMISE_HELD_FOR_REVIEW);
+    expect(failDeps.logMismatch).toHaveBeenCalledWith(PROPOSAL_ID, 'p1', 'active', 'suspended');
+  });
+});
+
 describe('enforce — step order (D.2 exactly)', () => {
   it('never calls resolvePremise or getCheckpoint for a stale policy', async () => {
     const deps = makeDeps();

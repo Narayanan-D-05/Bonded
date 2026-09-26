@@ -20,37 +20,55 @@ describe('compareTimestamp', () => {
 });
 
 describe('evaluatePremise', () => {
+  // NOTE: `evaluatePremise`'s first parameter widened from `claimed: bigint`
+  // to `claimedRaw: string` (the raw wire value, parsed internally now —
+  // see tolerance.ts and enforce.ts's corrected mismatch branch). Every call
+  // site below is mechanically updated to pass a string for that argument;
+  // the numeric values and every assertion's expected boolean are unchanged.
   it('gte: derived >= claimed', () => {
     const def = makePremise({ op: 'gte' });
-    expect(evaluatePremise(def, 10n, 10n)).toBe(true);
-    expect(evaluatePremise(def, 10n, 9n)).toBe(false);
-    expect(evaluatePremise(def, 10n, 11n)).toBe(true);
+    expect(evaluatePremise(def, '10', 10n)).toBe(true);
+    expect(evaluatePremise(def, '10', 9n)).toBe(false);
+    expect(evaluatePremise(def, '10', 11n)).toBe(true);
   });
 
   it('lte: derived <= claimed', () => {
     const def = makePremise({ op: 'lte' });
-    expect(evaluatePremise(def, 10n, 10n)).toBe(true);
-    expect(evaluatePremise(def, 10n, 11n)).toBe(false);
-    expect(evaluatePremise(def, 10n, 9n)).toBe(true);
+    expect(evaluatePremise(def, '10', 10n)).toBe(true);
+    expect(evaluatePremise(def, '10', 11n)).toBe(false);
+    expect(evaluatePremise(def, '10', 9n)).toBe(true);
   });
 
   it('older_than / younger_than dispatch to compareTimestamp', () => {
-    expect(evaluatePremise(makePremise({ op: 'older_than' }), 50n, 100n)).toBe(true);
-    expect(evaluatePremise(makePremise({ op: 'younger_than' }), 50n, 40n)).toBe(true);
+    expect(evaluatePremise(makePremise({ op: 'older_than' }), '50', 100n)).toBe(true);
+    expect(evaluatePremise(makePremise({ op: 'younger_than' }), '50', 40n)).toBe(true);
   });
 
   it('eq with no toleranceBps requires exact bigint equality', () => {
     const def = makePremise({ op: 'eq' });
-    expect(evaluatePremise(def, 100n, 100n)).toBe(true);
-    expect(evaluatePremise(def, 100n, 99n)).toBe(false);
-    expect(evaluatePremise(def, 100n, 101n)).toBe(false);
+    expect(evaluatePremise(def, '100', 100n)).toBe(true);
+    expect(evaluatePremise(def, '100', 99n)).toBe(false);
+    expect(evaluatePremise(def, '100', 101n)).toBe(false);
   });
 
   it('eq with toleranceBps delegates to bpsWithinTolerance', () => {
     const def = makePremise({ op: 'eq', toleranceBps: 100 }); // 1%
-    expect(evaluatePremise(def, 10_000n, 9_900n)).toBe(true); // exact lower bound
-    expect(evaluatePremise(def, 10_000n, 10_100n)).toBe(true); // exact upper bound
-    expect(evaluatePremise(def, 10_000n, 9_899n)).toBe(false);
-    expect(evaluatePremise(def, 10_000n, 10_101n)).toBe(false);
+    expect(evaluatePremise(def, '10000', 9_900n)).toBe(true); // exact lower bound
+    expect(evaluatePremise(def, '10000', 10_100n)).toBe(true); // exact upper bound
+    expect(evaluatePremise(def, '10000', 9_899n)).toBe(false);
+    expect(evaluatePremise(def, '10000', 10_101n)).toBe(false);
+  });
+
+  it('a non-\'eq\' op against a string derived throws TypeError', () => {
+    const def = makePremise({ op: 'gte', field: 'vendor.status' });
+    expect(() => evaluatePremise(def, 'active', 'active')).toThrow(TypeError);
+    expect(() => evaluatePremise(def, 'active', 'active')).toThrow(/gte/);
+    expect(() => evaluatePremise(def, 'active', 'active')).toThrow(/vendor\.status/);
+  });
+
+  it('categorical eq: string derived compares by strict string equality', () => {
+    const def = makePremise({ op: 'eq', field: 'vendor.status' });
+    expect(evaluatePremise(def, 'active', 'active')).toBe(true);
+    expect(evaluatePremise(def, 'active', 'suspended')).toBe(false);
   });
 });

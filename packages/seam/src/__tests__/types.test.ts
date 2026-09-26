@@ -18,8 +18,24 @@ describe('ReasonCode', () => {
     expect(ReasonCode.STALE_POLICY).toBe(5);
     expect(ReasonCode.IRREVERSIBLE_UNCONFIRMED).toBe(6);
 
+    // NOTE: this array literal is mechanically updated to include the new
+    // final member (PREMISE_HELD_FOR_REVIEW = 7, added additively below).
+    // Its shape is structurally tied to ReasonCode's full member list, so
+    // adding any new member forces this exact assertion to change — there is
+    // no way to add the 8th member without touching this line. See the new
+    // 'PREMISE_HELD_FOR_REVIEW' describe block below for the dedicated,
+    // purely-additive test of the new member itself.
     const numeric = Object.values(ReasonCode).filter((v) => typeof v === 'number');
-    expect(numeric).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(numeric).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+});
+
+describe('ReasonCode.PREMISE_HELD_FOR_REVIEW (new, additive, final member)', () => {
+  it('is the eighth member, value 7, added after IRREVERSIBLE_UNCONFIRMED without renumbering 0-6', () => {
+    expect(ReasonCode.PREMISE_HELD_FOR_REVIEW).toBe(7);
+    // 0-6 are unchanged from Part C.1:
+    expect(ReasonCode.OK).toBe(0);
+    expect(ReasonCode.IRREVERSIBLE_UNCONFIRMED).toBe(6);
   });
 });
 
@@ -36,6 +52,32 @@ describe('Premise', () => {
     expect(premises).toHaveLength(4);
     const ops: PremiseOp[] = ['gte', 'lte', 'eq', 'older_than', 'younger_than'];
     expect(ops).toHaveLength(5);
+  });
+
+  it('compiles with both new optional fields absent (default today\'s behavior)', () => {
+    const withoutNewFields: Premise = {
+      id: 'p5',
+      schema: 'issuer-oracle-tickets',
+      field: 'ticket.status',
+      op: 'eq',
+      value: 'active',
+    };
+    expect(withoutNewFields.holdOnMismatch).toBeUndefined();
+    expect(withoutNewFields.args).toBeUndefined();
+  });
+
+  it('compiles with both new optional fields present', () => {
+    const withNewFields: Premise = {
+      id: 'p6',
+      schema: 'issuer-oracle-vendors',
+      field: 'vendor.payoutAddress',
+      op: 'eq',
+      value: '0xabc',
+      holdOnMismatch: true,
+      args: ['vnd-globex-freight'],
+    };
+    expect(withNewFields.holdOnMismatch).toBe(true);
+    expect(withNewFields.args).toEqual(['vnd-globex-freight']);
   });
 });
 
