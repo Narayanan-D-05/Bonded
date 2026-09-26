@@ -1,16 +1,11 @@
 import Image from 'next/image';
 import { SponsorLogo, sponsorName, type Sponsor } from './ui/SponsorLogo';
 
-/** Each sponsor floats at its own height and pace, so the row reads as a loose, moving constellation. */
-const SPONSORS: readonly { id: Sponsor; lift: number; delay: string }[] = [
-  { id: 'intercepta', lift: 28, delay: '0s' },
-  { id: 'world', lift: -18, delay: '-2.2s' },
-  { id: 'sui', lift: 20, delay: '-4.1s' },
-];
+const SPONSORS: readonly Sponsor[] = ['intercepta', 'world', 'sui'];
 
 /**
- * The footer: a light-blue "Built with" band where the three sponsor logos float, spaced wide
- * and staggered, then the wordmark section after bondedfi.vercel.app: the project's
+ * The footer: a light-blue "Built with" band where the three sponsor logos sit in one even,
+ * centred row, then the wordmark section after bondedfi.vercel.app: the project's
  * /media/end.png globe (referenced, never copied) laid out as a wide landscape band behind a
  * large, faded "bonded". Navigation lives in the top nav.
  */
@@ -23,12 +18,10 @@ export function SiteFooter() {
           className="mx-auto flex max-w-4xl flex-wrap items-center justify-center"
           style={{ columnGap: 'clamp(56px, 12vw, 160px)', rowGap: 48, marginTop: 56 }}
         >
-          {SPONSORS.map(({ id, lift, delay }) => (
-            <li key={id} className="flex flex-col items-center gap-3" style={{ transform: `translateY(${lift}px)` }}>
-              <div className="sponsor-float" style={{ animationDelay: delay }}>
-                <div className="rounded-3xl bg-white p-4 shadow-[0_18px_40px_-18px_rgba(26,99,191,0.45)] ring-1 ring-[#DCEBFF]">
-                  <SponsorLogo sponsor={id} size={84} alt={sponsorName(id)} />
-                </div>
+          {SPONSORS.map((id) => (
+            <li key={id} className="flex flex-col items-center gap-3">
+              <div className="rounded-3xl bg-white p-4 shadow-[0_18px_40px_-18px_rgba(26,99,191,0.45)] ring-1 ring-[#DCEBFF]">
+                <SponsorLogo sponsor={id} size={84} alt={sponsorName(id)} />
               </div>
               <span className="text-base font-semibold text-[#0B1B33]">{sponsorName(id)}</span>
             </li>
