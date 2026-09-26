@@ -10,4 +10,5 @@
  */
 export * from './tickets-fixture.js';
 export * from './ecomm-fixture.js';
+export * from './vendor-fixture.js';
 export * from './schemas.js';

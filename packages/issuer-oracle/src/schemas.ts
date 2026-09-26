@@ -43,6 +43,7 @@
 
 import { fetchTicketTruth } from './tickets-fixture.js';
 import { fetchProductTruth } from './ecomm-fixture.js';
+import { fetchVendorTruth } from './vendor-fixture.js';
 
 export const issuerOracleTickets = {
   fields: {
@@ -67,6 +68,48 @@ export const issuerOracleEcomm = {
     'ecomm.listedPriceUSD': async (productId: string): Promise<bigint | null> => {
       const truth = await fetchProductTruth(productId);
       return truth === null ? null : BigInt(truth.listedPriceUSD);
+    },
+  },
+};
+
+/**
+ * The vendor-master/AP counterpart to `issuerOracleTickets`/`issuerOracleEcomm`
+ * above — same calling convention, same `fields['vendor.<field>'](vendorId)`
+ * shape, matched against `vendor-fixture.ts`'s `fetchVendorTruth`.
+ *
+ * `vendor.payoutAddress` and `vendor.status` resolve to plain strings rather
+ * than the `1n`/`0n`-coerced bigint convention `ticket.sellerAuthorized` uses
+ * for its boolean fact. This is intended, not a mismatch to flag:
+ * `packages/enforcer`'s `EnforceDeps.resolvePremise` dependency type is
+ * `Promise<bigint | string | null>` (confirmed — it was widened in a
+ * parallel change specifically to support this kind of categorical/string
+ * field, the same widening `ticket.status` above already relies on). A
+ * `Premise` with `op: 'eq'` compares a string field directly against
+ * `def.value` as a string, exactly like `ticket.status`.
+ *
+ * `vendor.invoiceAmountUSD` and `vendor.payoutAddressLastChangedAt` stay on
+ * the `bigint | null` convention — the former is a 6-decimal fixed-point USD
+ * amount (same scale as every other money field in this package), the
+ * latter a unix-seconds timestamp suitable for an `older_than`/`younger_than`
+ * op, both never a native JS `number` (CLAUDE.md rule 2).
+ */
+export const issuerOracleVendors = {
+  fields: {
+    'vendor.payoutAddress': async (vendorId: string): Promise<string | null> => {
+      const truth = await fetchVendorTruth(vendorId);
+      return truth === null ? null : truth.payoutAddress;
+    },
+    'vendor.invoiceAmountUSD': async (vendorId: string): Promise<bigint | null> => {
+      const truth = await fetchVendorTruth(vendorId);
+      return truth === null ? null : BigInt(truth.invoiceAmountUSD);
+    },
+    'vendor.status': async (vendorId: string): Promise<string | null> => {
+      const truth = await fetchVendorTruth(vendorId);
+      return truth === null ? null : truth.status;
+    },
+    'vendor.payoutAddressLastChangedAt': async (vendorId: string): Promise<bigint | null> => {
+      const truth = await fetchVendorTruth(vendorId);
+      return truth === null ? null : BigInt(truth.payoutAddressLastChangedAt);
     },
   },
 };
