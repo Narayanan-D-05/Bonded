@@ -46,6 +46,12 @@ export default async function StepUpPage({ searchParams }: Props) {
       {(sp.decision === 'denied' || sp.decision === 'error') && (
         <div className="rounded bg-red-100 px-4 py-3 text-sm text-red-800">
           {sp.decision === 'error' ? 'Error' : 'Denied'}: {sp.reason ?? '(no reason given)'}
+          {/* Read from the records, not assumed: the ledger and the vendor-master change log. */}
+          {!settled && changes.length === 0 && (
+            <div className="mt-1 font-semibold">
+              Protected action did not occur: no payment was made and the vendor record was not changed.
+            </div>
+          )}
         </div>
       )}
 
