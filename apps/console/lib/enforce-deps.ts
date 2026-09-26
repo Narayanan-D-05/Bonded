@@ -56,7 +56,6 @@ import {
   createEnforceDeps,
   failClosedTable,
   type ResolveFailure,
-  type SchemaFieldTable,
   type SchemaRegistry,
 } from '@bonded/dispatcher';
 import {
@@ -97,11 +96,12 @@ export interface ConsoleContext {
   ledger: SettlementLedger;
   writeBankChange: VendorMasterBankChangeWriter;
   /**
-   * The `intercepta-risk` field table. Always the live `interceptaRisk` adapter in this app
-   * (`defaultConsoleContext` never sets it). Only unit tests pass a stand-in, to reach the held
-   * branches without a key; no route can.
+   * How an invoice's `Proposal`/`PolicyArtifact` is built. Always `buildDemoInvoice` (the ONE
+   * committed AP policy) in this app; `defaultConsoleContext` never sets it and no route can. Unit
+   * tests set it to exercise the step-up chain under a clearly labelled, screen-free TEST policy,
+   * so no test ever has to pretend Intercepta answered.
    */
-  screening?: SchemaFieldTable;
+  buildInvoice?: (invoiceId: DemoInvoiceId, vendorSource: VendorSource) => Promise<DemoInvoice>;
 }
 
 /** The real `@bonded/sui-settlement` calls, reading SUI_* from `process.env`. */
@@ -135,14 +135,10 @@ export function defaultConsoleContext(): ConsoleContext {
  * `intercepta-risk` FAIL-CLOSED (errors go to `screeningErrorSink`, never
  * dropped). One per request, so each request keeps its own errors.
  */
-export function buildRegistry(
-  vendorSource: VendorSource,
-  screeningErrorSink: ResolveFailure[],
-  screening: SchemaFieldTable = interceptaRisk,
-): SchemaRegistry {
+export function buildRegistry(vendorSource: VendorSource, screeningErrorSink: ResolveFailure[]): SchemaRegistry {
   return {
     'issuer-oracle-vendors': vendorTruthFields(vendorSource),
-    'intercepta-risk': failClosedTable('intercepta-risk', screening, (f) => screeningErrorSink.push(f)),
+    'intercepta-risk': failClosedTable('intercepta-risk', interceptaRisk, (f) => screeningErrorSink.push(f)),
   };
 }
 
@@ -155,12 +151,12 @@ export interface MismatchRecord {
 
 /** The real `EnforceDeps` for one proposal. See the file header for what each piece is. */
 export function buildConsoleEnforceDeps(
-  ctx: Pick<ConsoleContext, 'chain' | 'vendorSource' | 'screening'>,
+  ctx: Pick<ConsoleContext, 'chain' | 'vendorSource'>,
   proposal: Pick<Proposal, 'premises'>,
   mismatchSink: MismatchRecord[] = [],
   screeningErrorSink: ResolveFailure[] = [],
 ): EnforceDeps {
-  const base = createEnforceDeps(buildRegistry(ctx.vendorSource, screeningErrorSink, ctx.screening), {
+  const base = createEnforceDeps(buildRegistry(ctx.vendorSource, screeningErrorSink), {
     getCheckpoint: async () => BigInt(Math.floor(Date.now() / 1000)),
     sumRecentSpend: () => ctx.chain.readVaultSpent(),
     logMismatch: async (proposalId, premiseId, claimedValue, derivedValue) => {
@@ -431,9 +427,9 @@ export async function readOnchainPolicyHash(chain: ChainPort, agent: Address = A
  */
 export async function runEnforceForInvoice(
   invoiceId: DemoInvoiceId,
-  ctx: Pick<ConsoleContext, 'chain' | 'vendorSource' | 'screening'> = defaultConsoleContext(),
+  ctx: Pick<ConsoleContext, 'chain' | 'vendorSource' | 'buildInvoice'> = defaultConsoleContext(),
 ): Promise<EnforceRunResult> {
-  const invoice = await buildDemoInvoice(invoiceId, ctx.vendorSource);
+  const invoice = await (ctx.buildInvoice ?? buildDemoInvoice)(invoiceId, ctx.vendorSource);
   const onchainPolicyHash = await readOnchainPolicyHash(ctx.chain, invoice.proposal.agent);
   const mismatches: MismatchRecord[] = [];
   const screeningErrors: ResolveFailure[] = [];

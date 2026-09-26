@@ -14,9 +14,12 @@
  *      submitted.
  *    · World: `HandleCallbackResult` values stand in for "handleCallback already ran and returned
  *      this", the convention @bonded/world-agents' own gate tests use.
- *    · Intercepta: INTERCEPTA_API_KEY is removed for the whole file, so the real adapter fails
- *      closed. Only the two held-chain tests pass `screening: ZERO_TRAITS_STANDIN` to reach the
- *      held branch; that table is never reachable from any route.
+ *    · Intercepta: nothing stands in for it, anywhere. INTERCEPTA_API_KEY is removed for the whole
+ *      file, so every screen premise under the real AP policy fails closed. To reach the HELD
+ *      branches without a key, the step-up chain tests run under TEST_SCREEN_FREE_POLICY: the AP
+ *      policy with its screening premises REMOVED (not answered), with the matching screen claims
+ *      dropped from each proposal. That policy is test-only, is never committed on-chain, and no
+ *      route can select it. The live chain still requires the key.
  */
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,12 +27,14 @@ import path, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Address, Hash32 } from '@bonded/seam';
 import { ReasonCode } from '@bonded/seam';
-import { canonicalHash, type SchemaFieldTable } from '@bonded/dispatcher';
+import type { PolicyArtifact } from '@bonded/seam';
+import { canonicalHash } from '@bonded/dispatcher';
 import {
   createFixtureVendorSourceWithChanges,
   createVendorMasterBankChangeWriter,
   fetchVendorTruth,
   readVendorMasterChanges,
+  type VendorSource,
 } from '@bonded/issuer-oracle';
 import type { SettleClearedInput, SettlementResult, SettleWithStepUpInput } from '@bonded/sui-settlement';
 import { STEPUP_FRESHNESS_WINDOW_MS } from '@bonded/world-agents';
@@ -48,6 +53,8 @@ import {
   serializeVerdict,
   type ChainPort,
   type ConsoleContext,
+  type DemoInvoice,
+  type DemoInvoiceId,
 } from '../enforce-deps.js';
 import { completeStepUp, proposePayment } from '../payment.js';
 import { SettlementLedger, isPreSubmissionFailure } from '../settlement-ledger.js';
@@ -64,8 +71,25 @@ afterAll(() => {
 const NOW = 1_790_400_000_000;
 const COMMITTED_HASH = canonicalHash(AP_AGENT_POLICY);
 
-/** Test-only: stands in for "the live Intercepta deep scan returned zero traits". Never used by app code. */
-const ZERO_TRAITS_STANDIN: SchemaFieldTable = { fields: { 'payment.payTo.traitCount': async () => 0n } };
+/**
+ * TEST-ONLY policy: the committed AP policy with every `intercepta-risk` premise removed. It does
+ * not claim any screen passed; it has no screen at all. Never committed, never reachable from a route.
+ */
+const TEST_SCREEN_FREE_POLICY: PolicyArtifact = {
+  ...AP_AGENT_POLICY,
+  premises: AP_AGENT_POLICY.premises.filter((p) => p.schema !== 'intercepta-risk'),
+};
+
+/** Builds the real invoice, then re-targets it at TEST_SCREEN_FREE_POLICY (dropping claims that policy doesn't define). */
+async function buildInvoiceUnderScreenFreeTestPolicy(invoiceId: DemoInvoiceId, vendorSource: VendorSource): Promise<DemoInvoice> {
+  const inv = await buildDemoInvoice(invoiceId, vendorSource);
+  const ids = new Set(TEST_SCREEN_FREE_POLICY.premises.map((p) => p.id));
+  return {
+    ...inv,
+    policy: TEST_SCREEN_FREE_POLICY,
+    proposal: { ...inv.proposal, premises: inv.proposal.premises.filter((c) => ids.has(c.premiseId)) },
+  };
+}
 
 interface Recorder {
   cleared: SettleClearedInput[];
@@ -87,12 +111,12 @@ function fakeResult(input: SettleClearedInput): SettlementResult {
   };
 }
 
-function testContext(over: Partial<ChainPort> = {}, screening?: SchemaFieldTable): { ctx: ConsoleContext; rec: Recorder; logPath: string } {
+function testContext(over: Partial<ChainPort> = {}, screenFreeTestPolicy = false): { ctx: ConsoleContext; rec: Recorder; logPath: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'bonded-console-'));
   const logPath = path.join(dir, 'vendor-master-changes.json');
   const rec: Recorder = { cleared: [], stepup: [] };
   const chain: ChainPort = {
-    readPolicyHash: async () => COMMITTED_HASH,
+    readPolicyHash: async () => (screenFreeTestPolicy ? canonicalHash(TEST_SCREEN_FREE_POLICY) : COMMITTED_HASH),
     readVaultSpent: async () => 1_251_000_000n,
     settleCleared: async (input) => {
       rec.cleared.push(input);
@@ -109,7 +133,7 @@ function testContext(over: Partial<ChainPort> = {}, screening?: SchemaFieldTable
     vendorSource: createFixtureVendorSourceWithChanges(logPath),
     ledger: new SettlementLedger(path.join(dir, 'settlements.json')),
     writeBankChange: createVendorMasterBankChangeWriter({} as NodeJS.ProcessEnv, { changeLogPath: logPath }),
-    ...(screening ? { screening } : {}),
+    ...(screenFreeTestPolicy ? { buildInvoice: buildInvoiceUnderScreenFreeTestPolicy } : {}),
   };
   return { ctx, rec, logPath };
 }
@@ -218,8 +242,8 @@ describe('runEnforceForInvoice: real enforce(), on-chain policy hash, no key', (
     expect(r.mismatches[0]?.derivedValue).toBe('suspended');
   });
 
-  it('a spoofed identity is refused by the identity premise even when the screen passes (never held)', async () => {
-    const { ctx } = testContext({}, ZERO_TRAITS_STANDIN);
+  it('under the screen-free TEST policy, a spoofed identity is still refused by the identity premise (never held)', async () => {
+    const { ctx } = testContext({}, true);
     const r = await runEnforceForInvoice('inv-globex-spoofed', ctx);
     expect(r.verdict.outcome).toBe(1);
     expect(r.mismatches[0]?.premiseId).toBe('p-globex-evm-identity');
@@ -301,10 +325,16 @@ describe('proposePayment: CLEARED settles once per proposal', () => {
 });
 
 describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', () => {
+  it('the screen-free TEST policy only removes premises (nothing answers for Intercepta) and is not the committed policy', () => {
+    expect(TEST_SCREEN_FREE_POLICY.premises.some((p) => p.schema === 'intercepta-risk')).toBe(false);
+    expect(TEST_SCREEN_FREE_POLICY.premises.every((p) => AP_AGENT_POLICY.premises.includes(p))).toBe(true);
+    expect(canonicalHash(TEST_SCREEN_FREE_POLICY)).not.toBe(COMMITTED_HASH);
+  });
+
   const verified = (authTimeMs = NOW - 1_000) => ({ verified: true as const, sub: 'world-sub-test', authTimeMs });
 
   it('bank change: approval writes the claimed address to the vendor master, re-enforces to CLEARED, and settles to the UPDATED truth', async () => {
-    const { ctx, rec, logPath } = testContext({}, ZERO_TRAITS_STANDIN);
+    const { ctx, rec, logPath } = testContext({}, true);
     const held = await runEnforceForInvoice('inv-globex-bank-change', ctx);
     expect(serializeVerdict(held.verdict)).toMatchObject({ outcomeLabel: 'HELD_FOR_STEPUP', reasonCodeLabel: 'PREMISE_HELD_FOR_REVIEW' });
     // Nothing is paid while held.
@@ -337,7 +367,7 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
   });
 
   it('a denied or stale World result writes nothing and pays nothing', async () => {
-    const { ctx, rec, logPath } = testContext({}, ZERO_TRAITS_STANDIN);
+    const { ctx, rec, logPath } = testContext({}, true);
     const hash = proposalIdFor('inv-globex-bank-change');
     expect(await completeStepUp(hash, { denied: true, reason: 'access_denied' }, ctx, NOW)).toMatchObject({ kind: 'denied', reason: 'access_denied' });
     expect(await completeStepUp(hash, verified(NOW - STEPUP_FRESHNESS_WINDOW_MS - 1), ctx, NOW)).toMatchObject({
@@ -350,7 +380,7 @@ describe('completeStepUp: real decideStepUp over handleCallback-shaped inputs', 
   });
 
   it('irreversible: approval settles halcyon through settleWithStepUp with a certified approval, to the on-file address, once', async () => {
-    const { ctx, rec, logPath } = testContext({}, ZERO_TRAITS_STANDIN);
+    const { ctx, rec, logPath } = testContext({}, true);
     const held = await runEnforceForInvoice('inv-halcyon-machining', ctx);
     expect(held.verdict.reasonCode).toBe(ReasonCode.IRREVERSIBLE_UNCONFIRMED);
     const out = await completeStepUp(held.verdict.proposalHash, verified(), ctx, NOW);
