@@ -220,3 +220,48 @@ testnet: digest `6RGhLEKACfW2i9FRf6ZZJRXBjyL7bxynae5GWus1Th4G`, 8,450 USDSUI to
 `0x053cbe6f…31ad` (verified on-chain). Remaining live gap: the halcyon IRREVERSIBLE_UNCONFIRMED path
 (`settleWithStepUp`) and the Xero source. Fixed: the post-callback redirect used the dev server's
 own address (`https://localhost:3000`) behind ngrok; it now uses WORLD_REDIRECT_URI's origin.
+
+## 2026-09-26 — Vendor side of a bank change: IDKit (World ID) request gate
+
+**What changed.** Until now only the payer's AP controller was checked (World ID for Agents step-up).
+An attacker's email could still *request* a bank change. Now a vendor's bank-change request is only
+on file if the person submitting it verified with World ID through IDKit (`/vendor/bank-change`,
+`apps/console/lib/idkit.ts`, `lib/vendor-bank-change.ts`), and a PREMISE_HELD_FOR_REVIEW approval in
+`lib/payment.ts` is denied `no_verified_vendor_request` unless such a request matches the invoice's
+claimed new payout address AND claimed EVM identity, verified after the payout address on file last
+changed. The denial writes nothing to the vendor master and pays nothing; `/stepup` reads both
+records to say so. IRREVERSIBLE_UNCONFIRMED (halcyon, over $10,000) is unaffected. New demo invoice
+`inv-halcyon-bank-change` ($6,300.00): halcyon's registered EVM identity, a new synthetic payout
+address. The committed AP policy is unchanged (verified live: no STALE_POLICY).
+
+**The proof's signal** binds vendorId + new payout address + new EVM identity. The server rebuilds
+it from the submitted fields and checks every response item's `signal_hash` before forwarding the
+result, as-is, to `POST https://developer.world.org/api/v4/verify/{rp_id}`. A record is appended to
+the gitignored `.data/vendor-bank-change-requests.json` only on World's success.
+
+**What this does NOT prove, stated plainly:**
+- **Not that the verified person works for the vendor.** IDKit proves a unique human holding a
+  verified document, bound to this exact request, and gives a per-action pseudonymous nullifier. The
+  vendor's representative is NOT enrolled at onboarding, so any passport-verified human could file a
+  request for any vendor. Production would record the representative's nullifier when the vendor is
+  onboarded and require the same nullifier on every later request. The AP controller must still call
+  the vendor on the number on file; the gate adds a verified, accountable requester, not an identity
+  match.
+- **The demoed credential may be the legacy fallback, not the NFC passport credential.** The code
+  requests the `passport` preset. The staging Simulator only implements World ID 3.0 levels, so there
+  the proof comes back as a 3.0 `document` (or `secure_document` / `orb`) proof, and the record says
+  so (`credentialType`, `protocolVersion`). Production would accept the 4.0 `passport` item
+  (issuer_schema_id 9303).
+- **The server does not verify the zero-knowledge proof itself.** World's verify endpoint does. Our
+  pre-checks (action, environment, credential, signal) only refuse things early.
+- **Repeat verifications.** One nullifier per person per action. The store refuses a replay of the
+  same request but allows the same person to file a different change. Whether World allows a second
+  verification of the same action is the Portal action's setting; if it does not, the second request
+  fails visibly at World and nothing is recorded.
+- **A request is not marked consumed** when an approval uses it. It stops matching because it must be
+  verified after `payoutAddressLastChangedAt`, and applying the change moves that timestamp past it.
+  With `VENDOR_MASTER_SOURCE=xero` that timestamp is the contact's `UpdatedDateUTC`, which ANY
+  contact edit moves, so an unrelated Xero edit after the vendor's request makes the request stop
+  matching (a false denial, never a false approval); the vendor then files again.
+- **Tests never construct an IDKit proof or a World verify response** (CLAUDE.md rule 7). The success
+  path (World answers 200) is proven only by a live run.

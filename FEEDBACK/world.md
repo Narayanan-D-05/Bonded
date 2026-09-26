@@ -76,3 +76,44 @@ now-deleted `identity/` (built for the abandoned Hostage Protocol's Recovery Des
   any socket or making any network call. The full live redirect → World app → callback →
   `StepUpApproval` path (PRD Part E steps 5–6) is unverified until the user completes portal
   registration, picks a tunnel, and gets the sandbox World ID app onto a phone.
+
+## 2026-09-26 — IDKit 4.3.0 for the vendor side of a bank change
+
+Written while building `/vendor/bank-change` (apps/console). No live proof has been completed yet in
+this entry; the success path waits on the signing key and a Simulator / World App run.
+
+- **The raw `.md` versions of the docs pages are excellent** (`https://docs.world.org/<page>.md`,
+  indexed by `/llms.txt`), and `/world-id/SKILL.md` is the single most useful page: it states
+  "World ID 4.0 uniqueness proofs are one-time per action for each user" and the environment-matching
+  rules that the integrate page leaves implicit.
+- **Which credentials the Simulator can complete is undocumented.** The integrate page says "use the
+  simulator and set environment to staging". We only learned it implements the 3.0 levels
+  (orb / secure_document / document / device) by reading its shipped JS bundle; its page just says it
+  "will change with the adoption of World ID 4.0". For a credential-choice argument this is the
+  deciding fact, and it isn't written anywhere.
+- **The `passport` preset's legacy behaviour is only in the Rust source.** The d.ts says "legacy
+  document fallback"; `rust/core/src/preset.rs` shows it sets `legacy_verification_level: Document`
+  and forces `allow_legacy_proofs_override: Some(true)`. Meanwhile the idkit-core JSDoc example for
+  `passport()` passes `allow_legacy_proofs: false` and the credentials page passes `true`, so the
+  flag reads as meaningful when the preset overrides it.
+- **Must a v4 action be pre-created?** The SKILL's gotcha table says an uncreated action shows
+  "action not found"; `IDKitRequestConfig.action_description` says "Only recommended for actions
+  created on-the-fly". We treated the action as Portal-created (one fixed action from env).
+- **Repeat verifications for a legitimately repeatable event.** A vendor may change banks twice, but
+  the nullifier is fixed per person per action and the docs' default is "reject duplicates". Whether
+  the v4 verify endpoint enforces the Portal action's max-verifications (the error code
+  `max_verifications_reached` exists) isn't stated. We key replay protection on (action, nullifier,
+  signal hash) instead and document the Portal setting as the thing to check.
+- **"Your backend should enforce the same value" (signal) has no how-to.** The helper is
+  `hashSignal` in the `@worldcoin/idkit-core/hashing` subpath, found via the d.ts, and the v4 example
+  shows an unpadded `"signal_hash": "0x0"`, so a string compare against the padded hash would fail;
+  we compare as field elements.
+- **Which verify host for staging?** The integrate page and the sandbox page use
+  `developer.world.org` for everything; the OpenAPI also lists `staging-developer.worldcoin.org` as a
+  "Staging domain". We use `developer.world.org` per the guide.
+- **No way to exercise the backend success path offline.** RP signatures have published test
+  vectors; proofs and verify responses don't, so (with our no-mock rule) the success path is only
+  provable live.
+- **The one improvement with the most impact:** a Simulator (or sandbox) that issues World ID 4.0
+  credentials, including Passport, with a documented per-environment credential matrix. Without it a
+  builder can request the right credential but can only demo its legacy fallback.

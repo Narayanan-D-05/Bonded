@@ -22,6 +22,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             Bonded Console
           </a>
           <span className="ml-3 text-sm text-slate-500">AP / BEC invoice enforcement demo</span>
+          <a href="/vendor/bank-change" className="ml-6 text-sm text-blue-600 hover:underline">
+            Vendor portal
+          </a>
         </header>
         <main className="mx-auto max-w-3xl px-6 py-8">{children}</main>
       </body>

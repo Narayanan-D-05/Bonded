@@ -18,7 +18,9 @@ import { completeStepUp } from '../../../lib/payment';
  * World attempt. `GET ?code=&state=` is the OIDC callback: `handleCallback`, then
  * `completeStepUp` (lib/payment.ts), which certifies the approval through the real `decideStepUp`
  * and settles (IRREVERSIBLE) or writes the confirmed bank change to the vendor master,
- * re-enforces and settles (PREMISE_HELD_FOR_REVIEW).
+ * re-enforces and settles (PREMISE_HELD_FOR_REVIEW). A PREMISE_HELD_FOR_REVIEW approval is denied
+ * `no_verified_vendor_request` unless the vendor filed the same change through IDKit
+ * (`/vendor/bank-change`); the denial's detail is passed to the page.
  *
  * Without World credentials this answers a visible 501 naming the missing vars. Nothing here
  * fakes an approval.
@@ -141,7 +143,8 @@ export async function GET(request: Request): Promise<Response> {
     if (outcome.kind === 'approved') {
       query = `decision=approved&sub=${encodeURIComponent(outcome.sub)}`;
     } else if (outcome.kind === 'denied') {
-      query = `decision=denied&reason=${encodeURIComponent(outcome.reason)}`;
+      // e.g. no_verified_vendor_request (the vendor-side IDKit gate), with the detail of what is on file.
+      query = `decision=denied&reason=${encodeURIComponent(outcome.reason)}&detail=${encodeURIComponent(outcome.detail)}`;
     } else if (outcome.kind === 'refused') {
       query = `decision=denied&reason=${encodeURIComponent(outcome.detail)}`;
     } else if (outcome.kind === 'not-held') {

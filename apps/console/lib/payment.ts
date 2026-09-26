@@ -10,8 +10,12 @@
  *    `approveStepUpForSettlement`, which runs the real `decideStepUp` over the
  *    `handleCallback` result. Then:
  *      · IRREVERSIBLE_UNCONFIRMED → `settleWithStepUp` to the on-file address.
- *      · PREMISE_HELD_FOR_REVIEW (payout mismatch) → the approval does NOT pay
- *        the claimed address. It writes the confirmed new address into the
+ *      · PREMISE_HELD_FOR_REVIEW (payout mismatch) → first the VENDOR-SIDE gate:
+ *        the approval only proceeds if an IDKit-verified vendor bank-change
+ *        request (`vendor-bank-change.ts`) matches the invoice's claimed new
+ *        payout address and EVM identity; otherwise it is denied
+ *        `no_verified_vendor_request` and nothing is written or paid. The
+ *        approval does NOT pay the claimed address. It writes the confirmed new address into the
  *        vendor master (fixture change log or Xero), re-runs `enforce()`, and
  *        the now-matching claim CLEARS and settles to the updated truth.
  *        Settlement always pays `deriveVendorRecipient`'s re-derived truth.
@@ -43,6 +47,7 @@ import {
   type SerializedVerdict,
 } from './enforce-deps';
 import type { LedgerEntry, RunOnceResult, SettledRecord } from './settlement-ledger';
+import { checkVendorRequestGate, type VerifiedVendorBankChangeRequest } from './vendor-bank-change';
 
 export type SettlementView =
   | { status: 'settled'; alreadySettled: boolean; digest: string; explorerUrl: string; recipient: string; valueUsdc: string; viaStepup: boolean; settledAtMs: number }
@@ -152,6 +157,8 @@ export type StepUpOutcome =
       sub: string;
       holdReason: 'IRREVERSIBLE_UNCONFIRMED' | 'PREMISE_HELD_FOR_REVIEW';
       vendorMasterChange: { previousPayoutAddress: string; newPayoutAddress: string; appliedTo: string } | null;
+      /** PREMISE_HELD_FOR_REVIEW only: the IDKit-verified vendor request that authorised the change. */
+      vendorRequest: VerifiedVendorBankChangeRequest | null;
       reenforcedVerdict: SerializedVerdict | null;
       settlement: SettlementView;
     };
@@ -184,7 +191,15 @@ export async function completeStepUp(
 
   if (run.verdict.reasonCode === ReasonCode.IRREVERSIBLE_UNCONFIRMED) {
     const settlement = await settleWithStepUpOnce(run, decision, ctx);
-    return { kind: 'approved', sub: decision.sub, holdReason: 'IRREVERSIBLE_UNCONFIRMED', vendorMasterChange: null, reenforcedVerdict: null, settlement };
+    return {
+      kind: 'approved',
+      sub: decision.sub,
+      holdReason: 'IRREVERSIBLE_UNCONFIRMED',
+      vendorMasterChange: null,
+      vendorRequest: null,
+      reenforcedVerdict: null,
+      settlement,
+    };
   }
 
   // PREMISE_HELD_FOR_REVIEW: only a payout-address hold is a bank change a human can confirm.
@@ -193,6 +208,12 @@ export async function completeStepUp(
   if (held_on === undefined || payoutDef?.field !== 'vendor.payoutAddress') {
     return { kind: 'refused', detail: `The hold is on ${held_on?.premiseId ?? 'no recorded premise'}, not a payout-address change; nothing to confirm.` };
   }
+
+  // The vendor side: the change must have been filed by the vendor and verified with IDKit, for
+  // exactly this payout address and EVM identity. Both claims are re-derived server-side from the
+  // proposal, never client-supplied. Checked before anything is written.
+  const gate = await vendorRequestGate(run, held_on.claimedValue, ctx);
+  if (!gate.ok) return { kind: 'denied', reason: gate.reason, detail: gate.detail };
   const change = await ctx.writeBankChange({
     vendorId: run.invoice.vendorId,
     previousPayoutAddress: held_on.derivedValue as `0x${string}`,
@@ -218,7 +239,45 @@ export async function completeStepUp(
   } else {
     settlement = { status: 'not-settled', reason: `Re-enforced after the vendor-master update: ${reenforcedVerdict.outcomeLabel} / ${reenforcedVerdict.reasonCodeLabel}.` };
   }
-  return { kind: 'approved', sub: decision.sub, holdReason: 'PREMISE_HELD_FOR_REVIEW', vendorMasterChange, reenforcedVerdict, settlement };
+  return {
+    kind: 'approved',
+    sub: decision.sub,
+    holdReason: 'PREMISE_HELD_FOR_REVIEW',
+    vendorMasterChange,
+    vendorRequest: gate.request,
+    reenforcedVerdict,
+    settlement,
+  };
+}
+
+/** The claimed payee EVM identity, from the proposal's own `vendor.evmAddress` premise claim. */
+export function claimedEvmIdentity(run: Pick<EnforceRunResult, 'invoice'>): string | null {
+  const { policy, proposal } = run.invoice;
+  for (const claim of proposal.premises) {
+    const def = policy.premises.find((p) => p.id === claim.premiseId);
+    if (def?.field === 'vendor.evmAddress') return claim.claimedValue;
+  }
+  return null;
+}
+
+async function vendorRequestGate(
+  run: EnforceRunResult,
+  claimedPayoutAddress: string,
+  ctx: ConsoleContext,
+): Promise<{ ok: true; request: VerifiedVendorBankChangeRequest } | { ok: false; reason: string; detail: string }> {
+  const vendorId = run.invoice.vendorId;
+  const evm = claimedEvmIdentity(run);
+  if (evm === null) {
+    return { ok: false, reason: 'no_verified_vendor_request', detail: `The invoice claims no EVM identity for ${vendorId}, so no vendor request can match it.` };
+  }
+  const truth = await ctx.vendorSource(vendorId);
+  if (truth === null) return { ok: false, reason: 'no_verified_vendor_request', detail: `${vendorId} is not in the vendor master.` };
+  return checkVendorRequestGate(await ctx.vendorRequests.list(), {
+    vendorId,
+    claimedPayoutAddress,
+    claimedEvmAddress: evm,
+    payoutAddressLastChangedAt: truth.payoutAddressLastChangedAt,
+  });
 }
 
 async function settleWithStepUpOnce(run: EnforceRunResult, decision: CertifiedStepUpApproval, ctx: ConsoleContext): Promise<SettlementView> {

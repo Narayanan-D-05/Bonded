@@ -5,7 +5,7 @@ import { defaultConsoleContext, listDemoInvoices } from '../../lib/enforce-deps'
 export const dynamic = 'force-dynamic';
 
 /**
- * Invoice Inbox: the five demo invoices the AP agent has to pay. Opening one is the agent
+ * Invoice Inbox: the six demo invoices the AP agent has to pay. Opening one is the agent
  * proposing that payment (`POST /api/enforce`); a CLEARED verdict settles on Sui without any human
  * click. No verdict is computed on this list.
  */

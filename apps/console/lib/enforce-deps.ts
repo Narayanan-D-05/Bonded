@@ -29,7 +29,7 @@
  *    (`bindClaimArgs`), so one committed policy can screen whatever payee
  *    identity each invoice claims.
  *
- * === The five demo invoices ===
+ * === The six demo invoices ===
  *
  *  - `inv-acme-supplies`: correct claims, key-free → CLEARED → settles.
  *  - `inv-globex-spoofed`: the spoofed email's claims (a real OFAC-listed EVM
@@ -45,6 +45,14 @@
  *  - `inv-halcyon-machining`: correct claims, $15,000 > $10,000 threshold →
  *    HELD / IRREVERSIBLE_UNCONFIRMED (needs a key for the screen) → World
  *    step-up → `settleWithStepUp` pays the on-file address.
+ *  - `inv-halcyon-bank-change`: the IDKit demo (the globex bank change was
+ *    already settled live and applied). halcyon's REGISTERED EVM identity and
+ *    a NEW Sui payout address, $6,300.00 (under the irreversible threshold, so
+ *    the only hold is the bank change) → screen passes (needs a key) → HELD /
+ *    PREMISE_HELD_FOR_REVIEW. The AP step-up only succeeds if halcyon's
+ *    representative first filed the same change at /vendor/bank-change and
+ *    verified it with IDKit (`vendor-bank-change.ts`, gate in `payment.ts`).
+ *    The same gate applies to every PREMISE_HELD_FOR_REVIEW approval.
  */
 
 import { createHash } from 'node:crypto';
@@ -78,7 +86,9 @@ import {
 } from '@bonded/sui-settlement';
 import { WORLD_ENV } from '@bonded/world-agents';
 import { AP_AGENT_ADDRESS, AP_AGENT_POLICY, AP_VAULT_TARGET_ADDRESS } from './ap-policy';
+import { IDKIT_ENV } from './idkit';
 import { SettlementLedger } from './settlement-ledger';
+import { defaultVendorRequestStorePath, fileVendorRequestStore, type VendorRequestStore } from './vendor-bank-change';
 
 // ─── Context: chain, vendor master, ledger ─────────────────────────────────
 
@@ -95,6 +105,11 @@ export interface ConsoleContext {
   vendorSource: VendorSource;
   ledger: SettlementLedger;
   writeBankChange: VendorMasterBankChangeWriter;
+  /**
+   * The IDKit-verified vendor bank-change requests (`.data/vendor-bank-change-requests.json`). A
+   * PREMISE_HELD_FOR_REVIEW approval only proceeds when one matches the invoice's claim.
+   */
+  vendorRequests: VendorRequestStore;
   /**
    * How an invoice's `Proposal`/`PolicyArtifact` is built. Always `buildDemoInvoice` (the ONE
    * committed AP policy) in this app; `defaultConsoleContext` never sets it and no route can. Unit
@@ -123,6 +138,7 @@ export function defaultConsoleContext(): ConsoleContext {
       vendorSource: createVendorSource(process.env, { changeLogPath }),
       ledger: new SettlementLedger(),
       writeBankChange: createVendorMasterBankChangeWriter(process.env, { changeLogPath }),
+      vendorRequests: fileVendorRequestStore(defaultVendorRequestStorePath()),
     };
   }
   return defaultContext;
@@ -186,12 +202,23 @@ const CLAIMED_SPOOF_EVM_IDENTITY = '0x098b716b8aaf21512996dc57eb0615e2383e2f96' 
 export const GLOBEX_NEW_BANK_PAYOUT_ADDRESS =
   '0x053cbe6fe7b37c2f10a0d30eab88de7466cb9f63a6145a3d963fb9ccd81631ad' as Address;
 
+/**
+ * Halcyon's new Sui payout address for the IDKit bank-change demo. Synthetic, like every address in
+ * this demo: sha256("bonded-synthetic-sui-payout:vnd-halcyon-machining:bank-change").
+ */
+export const HALCYON_NEW_BANK_PAYOUT_ADDRESS =
+  '0x4b7d62a058390ef2ee51add354dad9776e4dca91953f159f92d340ddb38850f7' as Address;
+
+/** $6,300.00, under the $10,000.00 irreversible threshold, so the bank change is the only hold. */
+export const HALCYON_BANK_CHANGE_INVOICE_USDC = '6300000000';
+
 export const DEMO_INVOICE_IDS = [
   'inv-acme-supplies',
   'inv-globex-spoofed',
   'inv-globex-bank-change',
   'inv-suspended-corp',
   'inv-halcyon-machining',
+  'inv-halcyon-bank-change',
 ] as const;
 export type DemoInvoiceId = (typeof DEMO_INVOICE_IDS)[number];
 
@@ -219,6 +246,7 @@ const VENDOR_OF: Record<DemoInvoiceId, string> = {
   'inv-globex-bank-change': 'vnd-globex-freight',
   'inv-suspended-corp': 'vnd-suspended-corp',
   'inv-halcyon-machining': 'vnd-halcyon-machining',
+  'inv-halcyon-bank-change': 'vnd-halcyon-machining',
 };
 
 export interface DemoInvoice {
@@ -328,6 +356,24 @@ export async function buildDemoInvoice(invoiceId: DemoInvoiceId, vendorSource: V
           { premiseId: 'p-halcyon-evm-identity', claimedValue: truth.evmAddress },
           { premiseId: 'p-halcyon-payout', claimedValue: truth.payoutAddress },
         ], 1_790_300_400),
+      };
+    case 'inv-halcyon-bank-change':
+      return {
+        ...base,
+        claimedInvoiceAmountUSD: HALCYON_BANK_CHANGE_INVOICE_USDC,
+        scenarioLabel:
+          "A bank change filed by the vendor through IDKit: halcyon's registered (clean) EVM identity and a new payout address, $6,300.00. " +
+          "The screen passes and the payout mismatch holds. The AP step-up only succeeds if halcyon's representative filed this exact change " +
+          'at /vendor/bank-change and verified it with World ID (IDKit); then the vendor master is updated and the invoice clears and settles.',
+        needs: ['INTERCEPTA_API_KEY', ...Object.values(WORLD_ENV).slice(0, 3), ...Object.values(IDKIT_ENV)],
+        claimedPayoutAddress: HALCYON_NEW_BANK_PAYOUT_ADDRESS,
+        claimedPayeeEvmAddress: truth.evmAddress,
+        proposal: proposal(invoiceId, HALCYON_BANK_CHANGE_INVOICE_USDC, [
+          { premiseId: 'p-halcyon-screen', claimedValue: '0' },
+          { premiseId: 'p-halcyon-status', claimedValue: 'active' },
+          { premiseId: 'p-halcyon-evm-identity', claimedValue: truth.evmAddress },
+          { premiseId: 'p-halcyon-payout', claimedValue: HALCYON_NEW_BANK_PAYOUT_ADDRESS },
+        ], 1_790_300_500),
       };
   }
 }
