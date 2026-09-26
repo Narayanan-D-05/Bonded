@@ -23,7 +23,7 @@ export function SiteNav() {
   const pathname = usePathname() ?? '/';
   return (
     <header className="sticky top-0 z-40 border-b border-rule bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-      <div className="mx-auto flex max-w-content flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-content flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6 lg:px-12">
         <Link href="/" className="flex items-center gap-2.5" aria-label="Bonded, overview">
           <LogoMark />
           <span className="font-display text-xl font-bold tracking-[-0.02em] text-navy">Bonded</span>

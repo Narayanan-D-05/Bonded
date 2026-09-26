@@ -67,7 +67,7 @@ const config: Config = {
         control: '6px',
       },
       maxWidth: {
-        content: '1120px',
+        content: '1440px',
       },
     },
   },

@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
  * eyebrow, and Bricolage Grotesque display headings.
  */
 export function Container({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`mx-auto w-full max-w-content px-4 sm:px-6 ${className}`}>{children}</div>;
+  return <div className={`mx-auto w-full max-w-content px-4 sm:px-6 lg:px-12 ${className}`}>{children}</div>;
 }
 
 /** Small uppercase label above a title: a solid orange bar, then soft-orange text (>= 5.3:1 on blue). */
