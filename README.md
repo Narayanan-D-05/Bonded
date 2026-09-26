@@ -14,9 +14,8 @@ auto-approved *or* auto-refused: it's the one signal that always forces a fresh 
 check, because vendors do legitimately change banks sometimes. Everything else that's wrong just
 gets refused.
 
-**Spec:** [`BONDED_COMMERCE_MIGRATION_PRD.md`](BONDED_COMMERCE_MIGRATION_PRD.md) (migrating
-[`BONDED_IMPLEMENTATION_PRD.md`](BONDED_IMPLEMENTATION_PRD.md)) · **Working rules:**
-[`CLAUDE.md`](CLAUDE.md) · **What is and isn't built, plus the live build log:**
+**Spec:** [`BONDED_PRD.md`](BONDED_PRD.md) · **Sponsors, in detail:** [`sponsers.md`](sponsers.md) ·
+**Working rules:** [`CLAUDE.md`](CLAUDE.md) · **What is and isn't built, plus the live build log:**
 [`docs/THREATMODEL.md`](docs/THREATMODEL.md)
 
 Sponsors: **Intercepta · Sui · World (ID for Agents).**
