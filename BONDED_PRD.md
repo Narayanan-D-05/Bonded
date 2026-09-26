@@ -6,10 +6,12 @@ function signature, deployed address, and test count below was read or run direc
 repository on 2026-09-26. Where something could not be confirmed this way, it is stated as
 unconfirmed rather than guessed (see "Honest disclosures" below).
 
-This supersedes `BONDED_IMPLEMENTATION_PRD.md` (the original ETHOnline Graph/Arc/Ledger spec) and
-`BONDED_COMMERCE_MIGRATION_PRD.md` (a migration plan targeting ENS/Curvegrid and a ticket-scalper
-demo). Both describe designs the project has since moved past. Neither is edited or deleted by this
-document — they remain in the repo as historical artifacts.
+This supersedes two earlier documents, no longer present in the working tree (removed once this file
+existed to replace them; both are still recoverable from git history): `BONDED_IMPLEMENTATION_PRD.md`
+(the original ETHOnline Graph/Arc/Ledger spec) and `BONDED_COMMERCE_MIGRATION_PRD.md` (a migration
+plan that had, at one point, targeted ENS and Curvegrid alongside a ticket-scalper demo — scope this
+project never shipped and dropped before this document was written). Both described designs the
+project moved past before being built out; neither reflects anything below.
 
 ---
 
