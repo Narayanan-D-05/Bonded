@@ -10,7 +10,8 @@
 
 import { fetchTicketTruth } from '../tickets-fixture.js';
 import { fetchProductTruth } from '../ecomm-fixture.js';
-import { issuerOracleTickets, issuerOracleEcomm } from '../schemas.js';
+import { fetchVendorTruth } from '../vendor-fixture.js';
+import { issuerOracleTickets, issuerOracleEcomm, issuerOracleVendors } from '../schemas.js';
 
 describe('fetchTicketTruth', () => {
   it('returns the seeded clean scheduled event (evt-tokyo-showcase)', async () => {
@@ -126,5 +127,115 @@ describe('issuerOracleEcomm.fields — resolvePremise adapter convention', () =>
 
   it('ecomm.listedPriceUSD resolves to null for an unknown product', async () => {
     await expect(issuerOracleEcomm.fields['ecomm.listedPriceUSD']('prod-does-not-exist')).resolves.toBeNull();
+  });
+});
+
+/**
+ * The vendor-master/AP (BEC / vendor-invoice-payment-fraud) counterpart to
+ * the tickets/ecomm blocks above. Seeded scenarios:
+ *  - `vnd-acme-supplies`   — clean, active, old payout-address change.
+ *  - `vnd-globex-freight`  — active, RECENT legitimate payout-address change
+ *    (the villain corpus separately claims a different, fraudulent address
+ *    for this same id — not exercised here, since that fraudulent value
+ *    intentionally does not live in this package).
+ *  - `vnd-suspended-corp`  — suspended; the hard-refuse case.
+ */
+describe('fetchVendorTruth', () => {
+  it('returns the seeded clean active vendor (vnd-acme-supplies)', async () => {
+    const truth = await fetchVendorTruth('vnd-acme-supplies');
+    expect(truth).toEqual({
+      vendorId: 'vnd-acme-supplies',
+      legalName: 'Acme Supplies LLC',
+      payoutAddress: '0x4d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0',
+      invoiceAmountUSD: '1250000000',
+      status: 'active',
+      payoutAddressLastChangedAt: 1736899200,
+    });
+  });
+
+  it('returns the seeded active vendor with a recent payout-address change (vnd-globex-freight)', async () => {
+    const truth = await fetchVendorTruth('vnd-globex-freight');
+    expect(truth).toEqual({
+      vendorId: 'vnd-globex-freight',
+      legalName: 'Globex Freight & Logistics Inc.',
+      payoutAddress: '0xcbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e',
+      invoiceAmountUSD: '8450000000',
+      status: 'active',
+      payoutAddressLastChangedAt: 1790172000,
+    });
+    // the recent change is more recent than acme-supplies' old one — the
+    // legitimate-bank-change signal this vendor exists to represent
+    expect(truth!.payoutAddressLastChangedAt).toBeGreaterThan(
+      (await fetchVendorTruth('vnd-acme-supplies'))!.payoutAddressLastChangedAt,
+    );
+  });
+
+  it('returns the seeded suspended vendor (vnd-suspended-corp)', async () => {
+    const truth = await fetchVendorTruth('vnd-suspended-corp');
+    expect(truth?.status).toBe('suspended');
+  });
+
+  it('returns null for an unknown vendor id', async () => {
+    await expect(fetchVendorTruth('vnd-does-not-exist')).resolves.toBeNull();
+  });
+});
+
+describe('issuerOracleVendors.fields — resolvePremise adapter convention', () => {
+  it('vendor.payoutAddress resolves the true current address for each seeded vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.payoutAddress']('vnd-acme-supplies')).resolves.toBe(
+      '0x4d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0',
+    );
+    await expect(issuerOracleVendors.fields['vendor.payoutAddress']('vnd-globex-freight')).resolves.toBe(
+      '0xcbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e',
+    );
+    await expect(issuerOracleVendors.fields['vendor.payoutAddress']('vnd-suspended-corp')).resolves.toBe(
+      '0x73808d9aa7b4c1cedbe8f5020f1c293643505d6a7784919eabb8c5d2dfecf906',
+    );
+  });
+
+  it('vendor.payoutAddress resolves to null for an unknown vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.payoutAddress']('vnd-does-not-exist')).resolves.toBeNull();
+  });
+
+  it('vendor.invoiceAmountUSD resolves to a bigint in 6-decimal base units for each seeded vendor', async () => {
+    const acme = await issuerOracleVendors.fields['vendor.invoiceAmountUSD']('vnd-acme-supplies');
+    expect(acme).toBe(1_250_000_000n);
+    expect(typeof acme).toBe('bigint');
+    await expect(issuerOracleVendors.fields['vendor.invoiceAmountUSD']('vnd-globex-freight')).resolves.toBe(
+      8_450_000_000n,
+    );
+    await expect(issuerOracleVendors.fields['vendor.invoiceAmountUSD']('vnd-suspended-corp')).resolves.toBe(
+      4_200_000_000n,
+    );
+  });
+
+  it('vendor.invoiceAmountUSD resolves to null for an unknown vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.invoiceAmountUSD']('vnd-does-not-exist')).resolves.toBeNull();
+  });
+
+  it('vendor.status resolves "active" for the two active vendors and "suspended" for the suspended one', async () => {
+    await expect(issuerOracleVendors.fields['vendor.status']('vnd-acme-supplies')).resolves.toBe('active');
+    await expect(issuerOracleVendors.fields['vendor.status']('vnd-globex-freight')).resolves.toBe('active');
+    await expect(issuerOracleVendors.fields['vendor.status']('vnd-suspended-corp')).resolves.toBe('suspended');
+  });
+
+  it('vendor.status resolves to null for an unknown vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.status']('vnd-does-not-exist')).resolves.toBeNull();
+  });
+
+  it('vendor.payoutAddressLastChangedAt resolves to a bigint unix-seconds timestamp for each seeded vendor', async () => {
+    const acme = await issuerOracleVendors.fields['vendor.payoutAddressLastChangedAt']('vnd-acme-supplies');
+    expect(acme).toBe(1736899200n);
+    expect(typeof acme).toBe('bigint');
+    const globex = await issuerOracleVendors.fields['vendor.payoutAddressLastChangedAt']('vnd-globex-freight');
+    expect(globex).toBe(1790172000n);
+    // recent globex change is a larger (later) unix-seconds value than acme's old one
+    expect(globex).toBeGreaterThan(acme!);
+  });
+
+  it('vendor.payoutAddressLastChangedAt resolves to null for an unknown vendor', async () => {
+    await expect(
+      issuerOracleVendors.fields['vendor.payoutAddressLastChangedAt']('vnd-does-not-exist'),
+    ).resolves.toBeNull();
   });
 });
