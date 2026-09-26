@@ -5,6 +5,7 @@ import { defaultConsoleContext, listDemoInvoices } from '../../lib/enforce-deps'
 import type { LedgerEntry } from '../../lib/settlement-ledger';
 import { Hash } from '../../components/ui/Hash';
 import { LedgerStatus } from '../../components/ui/LedgerStatus';
+import { readVerdictLog, type VerdictLogEntry } from '../../lib/verdict-log';
 import { Notice } from '../../components/ui/Notice';
 import { PageHeader } from '../../components/ui/PageHeader';
 
@@ -21,6 +22,13 @@ export default async function InvoiceInboxPage() {
   const invoices = await listDemoInvoices(defaultConsoleContext().vendorSource);
   const ledger = await readDemoLedger();
   const entryOf = new Map<string, LedgerEntry | null>(ledger.ok ? ledger.value.map((r) => [r.invoiceId, r.entry]) : []);
+  // The agent's latest verdict per invoice (display only). Unreadable -> no verdicts shown.
+  let verdictOf: Record<string, VerdictLogEntry> = {};
+  try {
+    verdictOf = await readVerdictLog();
+  } catch {
+    verdictOf = {};
+  }
 
   const needsLabel = (needs: string[]) => (needs.length === 0 ? 'No keys' : needs.join(', '));
 
@@ -80,7 +88,7 @@ export default async function InvoiceInboxPage() {
                   <Hash value={inv.claimedPayoutAddress} />
                 </td>
                 <td className="px-3 py-4">
-                  <LedgerStatus entry={entryOf.get(inv.invoiceId) ?? null} />
+                  <LedgerStatus entry={entryOf.get(inv.invoiceId) ?? null} verdict={verdictOf[inv.invoiceId] ?? null} />
                 </td>
                 <td className="px-5 py-4 text-right">
                   <Link
@@ -121,7 +129,7 @@ export default async function InvoiceInboxPage() {
                 <div className="flex gap-2">
                   <dt className="w-16 shrink-0 text-ink/70">Status</dt>
                   <dd className="min-w-0">
-                    <LedgerStatus entry={entryOf.get(inv.invoiceId) ?? null} />
+                    <LedgerStatus entry={entryOf.get(inv.invoiceId) ?? null} verdict={verdictOf[inv.invoiceId] ?? null} />
                   </dd>
                 </div>
               </dl>
