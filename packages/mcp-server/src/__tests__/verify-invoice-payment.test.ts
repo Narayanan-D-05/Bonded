@@ -128,3 +128,102 @@ describe('verifyInvoicePayment', () => {
     expect(result.verdict.reasonCode).toBe(ReasonCode.PREMISE_UNRESOLVABLE);
   });
 });
+
+/**
+ * Added with the optional `claimedPayeeEvmAddress` input (the payee's claimed
+ * EVM identity, screened through Intercepta's intercepta-risk premise).
+ * These run with INTERCEPTA_API_KEY forcibly ABSENT, so they are
+ * deterministic and make no network call. They prove the fail-closed path. A
+ * live screen is never asserted here and never reported as passing.
+ */
+describe('verifyInvoicePayment — optional claimedPayeeEvmAddress (Intercepta screen)', () => {
+  const OFAC_LAZARUS_ETH = '0x098b716b8aaf21512996dc57eb0615e2383e2f96';
+  let savedKey: string | undefined;
+  beforeEach(() => {
+    savedKey = process.env['INTERCEPTA_API_KEY'];
+    delete process.env['INTERCEPTA_API_KEY'];
+  });
+  afterEach(() => {
+    if (savedKey !== undefined) process.env['INTERCEPTA_API_KEY'] = savedKey;
+  });
+
+  it('without claimedPayeeEvmAddress the policy has no intercepta-risk premise (unchanged behaviour)', async () => {
+    const result = await verifyInvoicePayment(makeInput({}));
+    expect(result.policy.premises.map((p) => p.schema)).not.toContain('intercepta-risk');
+    expect(result.screeningErrors).toEqual([]);
+  });
+
+  it('orders premises status -> intercepta screen -> payout address (hold) -> amount', async () => {
+    const result = await verifyInvoicePayment(
+      makeInput({
+        vendorId: 'vnd-globex-freight',
+        claimedPayoutAddress: GLOBEX_REAL_PAYOUT_ADDRESS,
+        claimedInvoiceAmountUSD: GLOBEX_REAL_INVOICE_AMOUNT_USD,
+        claimedPayeeEvmAddress: OFAC_LAZARUS_ETH,
+      }),
+    );
+    expect(result.policy.premises.map((p) => p.id)).toEqual([
+      'vendor-status-active',
+      'payee-evm-screen',
+      'vendor-payout-address',
+      'vendor-invoice-amount',
+    ]);
+    const screen = result.policy.premises[1];
+    expect(screen).toMatchObject({
+      schema: 'intercepta-risk',
+      field: 'payment.payTo.traitCount',
+      op: 'lte',
+      value: '0',
+      args: [OFAC_LAZARUS_ETH],
+    });
+    expect(screen?.holdOnMismatch).toBeUndefined();
+  });
+
+  it('no key: a fraudulent globex claim is REFUSED / PREMISE_UNRESOLVABLE (fail closed), never HELD, with the key error attached', async () => {
+    const result = await verifyInvoicePayment(
+      makeInput({
+        vendorId: 'vnd-globex-freight',
+        claimedPayoutAddress: '0xdeadbeef000000000000000000000000000000000000000000000000000dead',
+        claimedInvoiceAmountUSD: GLOBEX_REAL_INVOICE_AMOUNT_USD,
+        claimedPayeeEvmAddress: OFAC_LAZARUS_ETH,
+      }),
+    );
+    expect(result.verdict.outcomeLabel).toBe('REFUSED');
+    expect(result.verdict.reasonCode).toBe(ReasonCode.PREMISE_UNRESOLVABLE);
+    expect(result.screeningErrors).toHaveLength(1);
+    expect(result.screeningErrors[0]).toMatchObject({
+      schema: 'intercepta-risk',
+      field: 'payment.payTo.traitCount',
+      args: [OFAC_LAZARUS_ETH],
+      errorName: 'InterceptaKeyMissingError',
+    });
+    expect(result.mismatches).toEqual([]);
+  });
+
+  it('no key: even a fully correct acme claim is REFUSED — an unscreened payee never clears', async () => {
+    const result = await verifyInvoicePayment(
+      makeInput({ claimedPayeeEvmAddress: '0xec07a00bcc0e68b93dd8100b6488d4ec4bfeb5a1' }),
+    );
+    expect(result.verdict.outcomeLabel).toBe('REFUSED');
+    expect(result.verdict.reasonCode).toBe(ReasonCode.PREMISE_UNRESOLVABLE);
+  });
+
+  it('the status premise still runs first: a suspended vendor is PREMISE_MISMATCH before any screen is attempted', async () => {
+    const result = await verifyInvoicePayment(
+      makeInput({
+        vendorId: 'vnd-suspended-corp',
+        claimedPayoutAddress: SUSPENDED_REAL_PAYOUT_ADDRESS,
+        claimedInvoiceAmountUSD: SUSPENDED_REAL_INVOICE_AMOUNT_USD,
+        claimedPayeeEvmAddress: OFAC_LAZARUS_ETH,
+      }),
+    );
+    expect(result.verdict.reasonCode).toBe(ReasonCode.PREMISE_MISMATCH);
+    expect(result.screeningErrors).toEqual([]);
+  });
+
+  it('rejects a 32-byte Sui address as claimedPayeeEvmAddress (Intercepta screens EVM addresses only)', async () => {
+    await expect(
+      verifyInvoicePayment(makeInput({ claimedPayeeEvmAddress: ACME_REAL_PAYOUT_ADDRESS })),
+    ).rejects.toThrow();
+  });
+});

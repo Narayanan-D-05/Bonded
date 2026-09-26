@@ -71,6 +71,60 @@ export function createResolvePremise(registry: SchemaRegistry): EnforceDeps['res
   };
 }
 
+/** One adapter call that threw and was converted to `null` by `failClosedTable`. */
+export interface ResolveFailure {
+  schema: string;
+  field: string;
+  args: string[];
+  /** `error.name` (e.g. `InterceptaKeyMissingError`), or `'NonError'` if something other than an Error was thrown. */
+  errorName: string;
+  message: string;
+}
+
+/**
+ * Opt-in, per-table fail-closed wrapper. Every field function of `table` is
+ * wrapped so that a THROW becomes `null`, and the error is handed to
+ * `onFailure` first. Nothing is dropped silently.
+ *
+ * Why this exists: `EnforceDeps.resolvePremise`'s own contract
+ * (`packages/enforcer/src/enforce.ts`) says it returns `null` when a premise
+ * "cannot be resolved at all (unknown schema, unknown field, adapter error)",
+ * and `enforce()` maps `null` to REFUSED / PREMISE_UNRESOLVABLE. But
+ * `@bonded/intercepta-adapter` deliberately THROWS on a missing key, an HTTP
+ * error or an unexpected shape, so that no failure can be read as a value.
+ * Without this wrapper, such a throw escapes `enforce()` as a rejected
+ * promise, and no verdict is produced. With it, an unscreenable payee is a
+ * REFUSED verdict (fail closed), and the caller keeps the exact error to
+ * show next to that verdict.
+ *
+ * Opt-in on purpose: `createResolvePremise`'s default behaviour (a throw
+ * propagates) is unchanged for every table not wrapped here.
+ */
+export function failClosedTable(
+  schema: string,
+  table: SchemaFieldTable,
+  onFailure: (failure: ResolveFailure) => void,
+): SchemaFieldTable {
+  const fields: SchemaFieldTable['fields'] = {};
+  for (const [field, fn] of Object.entries(table.fields)) {
+    fields[field] = async (...args: string[]) => {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        onFailure({
+          schema,
+          field,
+          args: [...args],
+          errorName: error instanceof Error ? error.name : 'NonError',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    };
+  }
+  return { fields };
+}
+
 /**
  * Recursively sorts every object's keys (arrays keep their original order)
  * and tags `bigint` values so they survive `JSON.stringify` — which throws

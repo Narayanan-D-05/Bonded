@@ -19,21 +19,29 @@
  * `EnforceDeps` extras (`getCheckpoint`/`sumRecentSpend`/`logMismatch`) a
  * stateless, one-shot MCP tool call has to supply itself.
  *
- * Intercepta ('intercepta-risk') is NOT wired into this tool's registry.
- * Stated plainly, not silently omitted (per this task's own instructions):
- * `@bonded/intercepta-adapter`'s field functions take `(subjectAddress,
- * chain?)`, need a chain id, and require a live `INTERCEPTA_API_KEY` to
- * return anything real (CLAUDE.md rule 1 forbids mocking that response). This
- * tool has neither the chain identifier for `claimedPayoutAddress` nor a
- * guaranteed key at tool-call time, and wiring it in without either would
- * mean either fabricating a chain id (a guess) or crashing every call that
- * lacks a key. Screening the claimed payout address through Intercepta is a
- * real, valuable next step for this tool — just not one this pass includes.
+ * === Intercepta ('intercepta-risk'): screening the payee's EVM identity ===
+ *
+ * `claimedPayoutAddress` is a 32-byte Sui address. Intercepta cannot screen
+ * it: its address scans take an "ETH address/ENS", and its risk data covers
+ * EVM mainnet (docs/VERIFY_FINDINGS.md item 5). So the tool accepts an
+ * OPTIONAL `claimedPayeeEvmAddress`, the payee's claimed 20-byte EVM
+ * identity. When it is given, a fourth premise screens it (see
+ * `PREMISE_ID_PAYEE_EVM_SCREEN` below for the trait-count reasoning and the
+ * doc citations). When it is omitted, the policy is exactly the original
+ * three premises, and nothing about Intercepta runs.
+ *
+ * No key, or a failed live call: the `intercepta-risk` table is wrapped in
+ * `@bonded/dispatcher`'s `failClosedTable`, so the adapter's throw becomes
+ * `null`. `enforce()` maps that to REFUSED / PREMISE_UNRESOLVABLE, and the
+ * exact error is returned in `screeningErrors`. An unscreenable payee is
+ * never cleared, never held, and never silently treated as clean.
  *
  * === Policy shape, decided and documented here (not guessed) ===
  *
- * Three premises, checked in this order (the ORDER of `proposal.premises`,
- * which `enforce()` iterates and returns on the FIRST mismatch):
+ * Three premises (four when `claimedPayeeEvmAddress` is given), checked in
+ * this order (the ORDER of `proposal.premises`, which `enforce()` iterates
+ * and returns on the FIRST mismatch). The optional Intercepta screen sits
+ * between 1 and 2; see `PREMISE_ID_PAYEE_EVM_SCREEN`:
  *
  *   1. `vendor.status` must be `'active'` — checked FIRST and with
  *      `holdOnMismatch` unset (hard refuse). A suspended vendor is refused
@@ -94,8 +102,9 @@
  *     dependency stance, and CLAUDE.md's rule against guessing an unconfirmed
  *     chain API). It returns the current unix-seconds timestamp as a
  *     deterministic, monotonic-enough stand-in. This is safe ONLY because
- *     `@bonded/issuer-oracle`'s field table — the only schema wired into this
- *     tool's registry — ignores the `at` argument entirely (confirmed:
+ *     both schemas wired into this tool's registry (`@bonded/issuer-oracle`'s
+ *     vendor table and `@bonded/intercepta-adapter`'s `interceptaRisk`)
+ *     ignore the `at` argument entirely (confirmed:
  *     `@bonded/dispatcher`'s own `createResolvePremise` doc comment says no
  *     adapter in this repo pins its answer to a chain checkpoint today). The
  *     resulting `Verdict.blockChecked` is therefore NOT a real Sui checkpoint
@@ -128,8 +137,15 @@ import { z } from 'zod';
 import type { Address, Hash32, PolicyArtifact, Proposal, Verdict } from '@bonded/seam';
 import { ReasonCode } from '@bonded/seam';
 import { enforce } from '@bonded/enforcer';
-import { canonicalHash, createEnforceDeps, type SchemaRegistry } from '@bonded/dispatcher';
+import {
+  canonicalHash,
+  createEnforceDeps,
+  failClosedTable,
+  type ResolveFailure,
+  type SchemaRegistry,
+} from '@bonded/dispatcher';
 import { issuerOracleVendors } from '@bonded/issuer-oracle';
+import { interceptaRisk } from '@bonded/intercepta-adapter';
 
 /** See the file header for why each value is what it is. */
 const BUDGET_MAX_USDC = '50000000000'; // $50,000/day
@@ -141,10 +157,49 @@ const PREMISE_ID_STATUS = 'vendor-status-active';
 const PREMISE_ID_PAYOUT_ADDRESS = 'vendor-payout-address';
 const PREMISE_ID_INVOICE_AMOUNT = 'vendor-invoice-amount';
 
-/** The registry this tool wires into `@bonded/dispatcher` — see the file header re: Intercepta. */
-const REGISTRY: SchemaRegistry = {
-  'issuer-oracle-vendors': issuerOracleVendors,
-};
+/**
+ * Only present when `claimedPayeeEvmAddress` is given. Premise: Deep Scan
+ * `payment.payTo.traitCount` of the claimed EVM identity, op `lte`, value
+ * `'0'`. In other words, ANY documented risk trait is a mismatch.
+ *
+ * Why traits and not `toxicScore`: `toxicScore`'s range is UNCONFIRMED
+ * (VERIFY_FINDINGS item 5: "a number with **no documented range**"), so no
+ * threshold on it is used. The trait list needs no threshold, because the
+ * docs define each entry as a risk indicator:
+ *   - `traits`: "List of suspicious activities detected on the address"
+ *     (https://docs.web3antivirus.io/reference/scan-address.md OAS, fetched
+ *     2026-09-26).
+ *   - `ToxicScoreTraitV2.risk`: "Risk level of the trait".
+ *   - `name` enum: known_scammer, initiator_scam_transactions,
+ *     sanction_address_communication, suspicious_dex_pair_deployer,
+ *     suspicious_deployer, attack_money_target, zero_address_risk,
+ *     sanction_address, fake_phishing_transfer, non_kyc_transfers,
+ *     mixer_transfers, fake_phishing_contract_communication, rug_pull,
+ *     rug_pull_trader, blacklist. Every name is a risk category.
+ *
+ * ORDER: after `vendor.status` (a suspended vendor is refused without
+ * spending a live call), and BEFORE the `holdOnMismatch` payout-address
+ * premise. If the payout premise ran first, a spoofed invoice would return
+ * HELD_FOR_STEPUP before the screen was reached, and a human could approve
+ * paying a sanctioned identity. Running the screen first makes that case a
+ * hard REFUSE. `holdOnMismatch` is deliberately unset. The claimed value is
+ * always `'0'`: by paying, the agent implicitly asserts that the payee has
+ * no risk trait. The caller never supplies that value.
+ */
+const PREMISE_ID_PAYEE_EVM_SCREEN = 'payee-evm-screen';
+
+/**
+ * The registry this tool wires into `@bonded/dispatcher`. `intercepta-risk`
+ * is fail-closed: a throw (e.g. `InterceptaKeyMissingError`) becomes `null`,
+ * which means REFUSED / PREMISE_UNRESOLVABLE, and the error is pushed to
+ * `screeningErrors`.
+ */
+function buildRegistry(screeningErrors: ResolveFailure[]): SchemaRegistry {
+  return {
+    'issuer-oracle-vendors': issuerOracleVendors,
+    'intercepta-risk': failClosedTable('intercepta-risk', interceptaRisk, (f) => screeningErrors.push(f)),
+  };
+}
 
 /**
  * The zod RAW SHAPE (a plain object of per-field schemas, not a `z.object(...)`)
@@ -166,6 +221,18 @@ export const verifyInvoicePaymentInputShape = {
       'claimedInvoiceAmountUSD must be a 6-decimal fixed-point base-unit integer string (e.g. "1250000000" === $1,250.00) — never a decimal, never a float',
     ),
   agent: z.string().regex(/^0x[0-9a-fA-F]+$/, 'agent must be a 0x-hex address-like identifier for the paying agent'),
+  claimedPayeeEvmAddress: z
+    .string()
+    .regex(
+      /^0x[0-9a-fA-F]{40}$/,
+      'claimedPayeeEvmAddress must be a 20-byte EVM address (0x + 40 hex) — the payee identity Intercepta screens, not the Sui payout address',
+    )
+    .optional()
+    .describe(
+      "Optional. The payee's claimed EVM identity, screened live through Intercepta (Web3 Antivirus). When given, " +
+        'any documented risk trait on it refuses the payment; with no INTERCEPTA_API_KEY the payment is refused ' +
+        '(fail closed), never cleared.',
+    ),
 };
 
 /** `z.object(...)` of the shape above, for validating a call made outside the MCP SDK's own pipeline (e.g. this file's tests calling the handler directly). */
@@ -199,6 +266,13 @@ export interface VerifyInvoicePaymentResult {
   mismatches: PremiseDiff[];
   /** The exact `PolicyArtifact` this call constructed and checked the proposal against — for audit/display, not re-consumed by anything. */
   policy: PolicyArtifact;
+  /**
+   * Every Intercepta screen that could not be resolved (missing key, HTTP
+   * error, unexpected shape), with the exact error. It is non-empty exactly
+   * when the verdict was a fail-closed PREMISE_UNRESOLVABLE on the screen.
+   * Always empty when `claimedPayeeEvmAddress` was not given.
+   */
+  screeningErrors: ResolveFailure[];
 }
 
 const OUTCOME_LABEL: Record<0 | 1 | 2, SerializedVerdict['outcomeLabel']> = {
@@ -221,7 +295,12 @@ function reasonCodeLabel(code: ReasonCode): string {
  * the claim into `value` here keeps this ad-hoc, per-call policy's audit
  * trail honest about what was actually being asserted.
  */
-function buildPolicy(vendorId: string, claimedPayoutAddress: string, claimedInvoiceAmountUSD: string): PolicyArtifact {
+function buildPolicy(
+  vendorId: string,
+  claimedPayoutAddress: string,
+  claimedInvoiceAmountUSD: string,
+  claimedPayeeEvmAddress?: string,
+): PolicyArtifact {
   return {
     version: 1,
     budget: { asset: 'USDC', period: 'daily', max: BUDGET_MAX_USDC },
@@ -234,6 +313,19 @@ function buildPolicy(vendorId: string, claimedPayoutAddress: string, claimedInvo
         value: 'active',
         args: [vendorId],
       },
+      // Optional Intercepta screen, BEFORE the hold premise — see PREMISE_ID_PAYEE_EVM_SCREEN.
+      ...(claimedPayeeEvmAddress === undefined
+        ? []
+        : [
+            {
+              id: PREMISE_ID_PAYEE_EVM_SCREEN,
+              schema: 'intercepta-risk',
+              field: 'payment.payTo.traitCount',
+              op: 'lte' as const,
+              value: '0',
+              args: [claimedPayeeEvmAddress],
+            },
+          ]),
       {
         id: PREMISE_ID_PAYOUT_ADDRESS,
         schema: 'issuer-oracle-vendors',
@@ -285,6 +377,10 @@ function buildProposal(input: VerifyInvoicePaymentInput, policy: PolicyArtifact)
       // The agent's implicit claim that the vendor it's paying is in good
       // standing — see the file header's "why a vendor.status premise" note.
       { premiseId: PREMISE_ID_STATUS, claimedValue: 'active' },
+      // Implicit "no risk trait" claim, only when the screen premise exists.
+      ...(input.claimedPayeeEvmAddress === undefined
+        ? []
+        : [{ premiseId: PREMISE_ID_PAYEE_EVM_SCREEN, claimedValue: '0' }]),
       { premiseId: PREMISE_ID_PAYOUT_ADDRESS, claimedValue: input.claimedPayoutAddress },
       { premiseId: PREMISE_ID_INVOICE_AMOUNT, claimedValue: input.claimedInvoiceAmountUSD },
     ],
@@ -303,12 +399,18 @@ function buildProposal(input: VerifyInvoicePaymentInput, policy: PolicyArtifact)
 export async function verifyInvoicePayment(rawInput: VerifyInvoicePaymentInput): Promise<VerifyInvoicePaymentResult> {
   const input = verifyInvoicePaymentInputSchema.parse(rawInput);
 
-  const policy = buildPolicy(input.vendorId, input.claimedPayoutAddress, input.claimedInvoiceAmountUSD);
+  const policy = buildPolicy(
+    input.vendorId,
+    input.claimedPayoutAddress,
+    input.claimedInvoiceAmountUSD,
+    input.claimedPayeeEvmAddress,
+  );
   const onchainPolicyHash = canonicalHash(policy);
   const proposal = buildProposal(input, policy);
 
   const mismatches: PremiseDiff[] = [];
-  const deps = createEnforceDeps(REGISTRY, {
+  const screeningErrors: ResolveFailure[] = [];
+  const deps = createEnforceDeps(buildRegistry(screeningErrors), {
     getCheckpoint: async () => BigInt(Math.floor(Date.now() / 1000)),
     sumRecentSpend: async () => 0n,
     logMismatch: async (_proposalId, premiseId, claimedValue, derivedValue) => {
@@ -332,5 +434,6 @@ export async function verifyInvoicePayment(rawInput: VerifyInvoicePaymentInput):
     },
     mismatches,
     policy,
+    screeningErrors,
   };
 }

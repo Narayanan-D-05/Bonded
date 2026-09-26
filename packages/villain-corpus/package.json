@@ -14,11 +14,11 @@
   "dependencies": {
     "@bonded/dispatcher": "workspace:*",
     "@bonded/enforcer": "workspace:*",
+    "@bonded/intercepta-adapter": "workspace:*",
     "@bonded/issuer-oracle": "workspace:*",
     "@bonded/seam": "workspace:*"
   },
   "devDependencies": {
-    "@bonded/intercepta-adapter": "workspace:*",
     "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",

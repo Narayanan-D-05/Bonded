@@ -48,6 +48,28 @@ export interface VendorTruth {
   invoiceAmountUSD: string;
   status: 'active' | 'suspended';
   payoutAddressLastChangedAt: number;
+  /**
+   * The vendor's registered on-chain identity, used for SCREENING, not for
+   * settlement: a 20-byte EVM address, lowercase hex (`0x` + 40 chars).
+   *
+   * Why a second address at all: Intercepta (Web3 Antivirus) address scans
+   * take an "ETH address/ENS" and its risk data covers EVM mainnet
+   * (docs/VERIFY_FINDINGS.md item 5). Every `payoutAddress` above is a
+   * 32-byte Sui address, which Intercepta cannot screen and which
+   * `@bonded/intercepta-adapter`'s `parseScreeningSubject` rejects before any
+   * network call. So the thing that gets screened is the payee's EVM
+   * identity, while `payoutAddress` stays the Sui settlement destination.
+   *
+   * Field name is fixed (`evmAddress`): a real accounting-system connector
+   * built in parallel must produce this same shape.
+   *
+   * The three seeded values below are SYNTHETIC, like everything else in this
+   * disclosed fixture: each is the first 20 bytes of
+   * sha256("bonded-synthetic-evm-identity:<vendorId>"). They are not any real
+   * company's address, and they were checked absent from the OFAC SDN list
+   * (sdn.csv, fetched 2026-09-26) when chosen.
+   */
+  evmAddress: `0x${string}`;
 }
 
 /**
@@ -83,6 +105,7 @@ const TRUTH: Record<string, VendorTruth> = {
     invoiceAmountUSD: '1250000000', // $1,250.00
     status: 'active',
     payoutAddressLastChangedAt: 1736899200, // 2025-01-15T00:00:00Z — well over a year before this fixture's baseline (2026-09-26)
+    evmAddress: '0xec07a00bcc0e68b93dd8100b6488d4ec4bfeb5a1', // synthetic — see VendorTruth.evmAddress
   },
   'vnd-globex-freight': {
     vendorId: 'vnd-globex-freight',
@@ -95,6 +118,7 @@ const TRUTH: Record<string, VendorTruth> = {
     invoiceAmountUSD: '8450000000', // $8,450.00
     status: 'active',
     payoutAddressLastChangedAt: 1790172000, // 2026-09-23T14:00:00Z — three days before this fixture's baseline (2026-09-26): a recent, legitimate bank change
+    evmAddress: '0x98062f7075cd7a6b07379e88eb76e978fad188f6', // synthetic — see VendorTruth.evmAddress
   },
   'vnd-suspended-corp': {
     vendorId: 'vnd-suspended-corp',
@@ -103,6 +127,7 @@ const TRUTH: Record<string, VendorTruth> = {
     invoiceAmountUSD: '4200000000', // $4,200.00 — value not load-bearing; status is the point of this scenario
     status: 'suspended',
     payoutAddressLastChangedAt: 1748736000, // 2025-06-01T00:00:00Z — arbitrary, not load-bearing
+    evmAddress: '0x3dedb65cd8aed5a70842a9c7ca3dff4a6f83f39f', // synthetic — see VendorTruth.evmAddress
   },
 };
 

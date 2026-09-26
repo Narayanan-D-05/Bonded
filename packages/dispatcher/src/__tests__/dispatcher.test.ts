@@ -14,7 +14,14 @@ import type { Address, Hash32, PolicyArtifact, Premise, Proposal } from '@bonded
 import { ReasonCode } from '@bonded/seam';
 import type { LogRefInput } from '@bonded/enforcer';
 import { issuerOracleVendors } from '@bonded/issuer-oracle';
-import { canonicalHash, computeLogRef, createResolvePremise, type SchemaRegistry } from '../index.js';
+import {
+  canonicalHash,
+  computeLogRef,
+  createResolvePremise,
+  failClosedTable,
+  type ResolveFailure,
+  type SchemaRegistry,
+} from '../index.js';
 
 const CHECKPOINT = 42n;
 
@@ -241,5 +248,53 @@ describe('computeLogRef', () => {
     const base = computeLogRef(buildEntry());
     const changed = computeLogRef({ ...buildEntry(), outcome: 1, reasonCode: ReasonCode.PREMISE_MISMATCH });
     expect(changed).not.toBe(base);
+  });
+});
+
+describe('failClosedTable', () => {
+  it('passes a successful field value through unchanged and records nothing', async () => {
+    const failures: ResolveFailure[] = [];
+    const table = failClosedTable('s', { fields: { 'f.ok': async (a: string) => `got:${a}` } }, (f) => failures.push(f));
+    await expect(table.fields['f.ok']!('x')).resolves.toBe('got:x');
+    expect(failures).toEqual([]);
+  });
+
+  it('turns a thrown adapter error into null AND records it (visible, never silent)', async () => {
+    class KeyMissing extends Error {
+      constructor() {
+        super('KEY is not set');
+        this.name = 'KeyMissing';
+      }
+    }
+    const failures: ResolveFailure[] = [];
+    const table = failClosedTable(
+      'screen',
+      { fields: { 'f.boom': async () => { throw new KeyMissing(); } } },
+      (f) => failures.push(f),
+    );
+    await expect(table.fields['f.boom']!('0xabc', 'extra')).resolves.toBeNull();
+    expect(failures).toEqual([
+      { schema: 'screen', field: 'f.boom', args: ['0xabc', 'extra'], errorName: 'KeyMissing', message: 'KEY is not set' },
+    ]);
+  });
+
+  it('routed through createResolvePremise, a thrown error becomes the enforcer-level null (PREMISE_UNRESOLVABLE path)', async () => {
+    const failures: ResolveFailure[] = [];
+    const registry: SchemaRegistry = {
+      screen: failClosedTable('screen', { fields: { 'f.boom': async () => { throw new Error('down'); } } }, (f) =>
+        failures.push(f),
+      ),
+    };
+    const resolvePremise = createResolvePremise(registry);
+    const result = await resolvePremise(makePremise({ schema: 'screen', field: 'f.boom', args: ['a'] }), CHECKPOINT);
+    expect(result).toBeNull();
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.message).toBe('down');
+  });
+
+  it('does not change the default: an unwrapped table still propagates a throw', async () => {
+    const registry: SchemaRegistry = { raw: { fields: { 'f.boom': async () => { throw new Error('raw'); } } } };
+    const resolvePremise = createResolvePremise(registry);
+    await expect(resolvePremise(makePremise({ schema: 'raw', field: 'f.boom' }), CHECKPOINT)).rejects.toThrow('raw');
   });
 });

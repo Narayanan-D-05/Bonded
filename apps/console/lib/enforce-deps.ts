@@ -10,8 +10,8 @@
  *     documented caveats in `verify-invoice-payment.ts` almost verbatim) ===
  *
  *  - `getCheckpoint`: NOT a real Sui checkpoint reader. Returns the current unix-seconds
- *    timestamp as a monotonic-enough stand-in. This is safe ONLY because the one schema wired
- *    into `registry` below (`issuer-oracle-vendors`) ignores the `at` argument entirely —
+ *    timestamp as a monotonic-enough stand-in. This is safe ONLY because both schemas wired
+ *    into `registry` below (`issuer-oracle-vendors`, `intercepta-risk`) ignore the `at` argument entirely —
  *    confirmed by reading `@bonded/dispatcher`'s own `createResolvePremise` doc comment, not
  *    guessed. `Verdict.blockChecked` produced through this composition is therefore NOT a real
  *    Sui checkpoint and must never be presented as one anywhere in this app's UI.
@@ -33,21 +33,68 @@
  * `#fraudulent-payout-address[data-address]` attribute at runtime; that HTML file was read
  * directly (read-only) to copy the literal value below, so this app demonstrates the identical
  * fraudulent address villain-corpus's own harness proves against, without importing that
- * package or its filesystem-reading parser.
+ * package or its filesystem-reading parser. The globex claimed EVM identity
+ * (`#claimed-evm-identity[data-address]`) is mirrored the same way, and
+ * `__tests__/enforce-deps.test.ts` reads that HTML file to fail on any drift between the two.
+ *
+ * === Intercepta: screening the payee's EVM identity (globex invoice only) ===
+ *
+ * Every payout address here is a 32-byte Sui address, which Intercepta cannot screen (it takes
+ * an "ETH address/ENS", and its data covers EVM mainnet: docs/VERIFY_FINDINGS.md item 5). So the
+ * globex invoice's policy screens the payee's claimed EVM identity instead, through the
+ * `intercepta-risk` premise `payment.payTo.traitCount lte 0`. The premise runs FIRST, before the
+ * `holdOnMismatch` payout premise, so a sanctioned identity is REFUSED rather than held for a
+ * human who might approve it. The trait-semantics citations are on `payeeEvmScreenPremise`
+ * below. The suspended-corp and acme-supplies policies are KEY-FREE by design (no Intercepta
+ * premise), so they stay deterministic without a key.
+ *
+ * `intercepta-risk` is fail-closed (`@bonded/dispatcher`'s `failClosedTable`). With no
+ * `INTERCEPTA_API_KEY`, the adapter throws `InterceptaKeyMissingError` before any network call,
+ * that becomes `null`, and `enforce()` returns REFUSED / PREMISE_UNRESOLVABLE. The error itself
+ * is returned in `screeningErrors`. Consequence, stated plainly: the globex invoice is NO
+ * LONGER a HELD_FOR_STEPUP invoice, either with a key (expected REFUSED / PREMISE_MISMATCH for
+ * the sanctioned identity) or without one (REFUSED / PREMISE_UNRESOLVABLE). None of the three
+ * demo invoices re-derives to a held verdict any more, so `/api/stepup` answers 409 for all of them.
  */
 
 import type { Address, Hash32, PolicyArtifact, Proposal, Verdict } from '@bonded/seam';
 import { ReasonCode } from '@bonded/seam';
-import { enforce, type EnforceDeps } from '@bonded/enforcer';
-import { canonicalHash, createEnforceDeps, createResolvePremise, type SchemaRegistry } from '@bonded/dispatcher';
+import { enforce, evaluatePremise, type EnforceDeps } from '@bonded/enforcer';
+import {
+  canonicalHash,
+  createEnforceDeps,
+  createResolvePremise,
+  failClosedTable,
+  type ResolveFailure,
+  type SchemaRegistry,
+} from '@bonded/dispatcher';
 import { fetchVendorTruth, issuerOracleVendors } from '@bonded/issuer-oracle';
+import { interceptaRisk } from '@bonded/intercepta-adapter';
 import { WORLD_ENV } from '@bonded/world-agents';
 
 // ─── Registry / EnforceDeps composition ────────────────────────────────────
 
-/** The one schema this app's demo wires in. See the file header re: Intercepta being deliberately absent here too (same reasoning `packages/mcp-server` documents: no chain id for the claimed address, no guaranteed live key). `@bonded/intercepta-adapter` is a declared dependency of this app for a later pass, not imported by this file. */
+/**
+ * The schemas this app's demo wires in, with `intercepta-risk` FAIL-CLOSED: any adapter throw
+ * (missing key, HTTP error, unexpected shape) becomes `null`, so the verdict is REFUSED /
+ * PREMISE_UNRESOLVABLE, and the error goes to `screeningErrorSink`. It is never dropped. Build
+ * one per request, so each request's errors stay with that request.
+ */
+export function buildRegistry(screeningErrorSink: ResolveFailure[]): SchemaRegistry {
+  return {
+    'issuer-oracle-vendors': issuerOracleVendors,
+    'intercepta-risk': failClosedTable('intercepta-risk', interceptaRisk, (f) => screeningErrorSink.push(f)),
+  };
+}
+
+/**
+ * Shape reference only: which schemas this app wires, and in what order. `intercepta-risk` here
+ * is the RAW adapter table, which throws on failure. Runtime paths in this file always use
+ * `buildRegistry(sink)` instead.
+ */
 export const registry: SchemaRegistry = {
   'issuer-oracle-vendors': issuerOracleVendors,
+  'intercepta-risk': interceptaRisk,
 };
 
 export interface MismatchRecord {
@@ -58,8 +105,11 @@ export interface MismatchRecord {
 }
 
 /** Builds a real, non-mocked `EnforceDeps`. See the file header for what each extra is and is not. */
-export function buildConsoleEnforceDeps(mismatchSink: MismatchRecord[] = []): EnforceDeps {
-  return createEnforceDeps(registry, {
+export function buildConsoleEnforceDeps(
+  mismatchSink: MismatchRecord[] = [],
+  screeningErrorSink: ResolveFailure[] = [],
+): EnforceDeps {
+  return createEnforceDeps(buildRegistry(screeningErrorSink), {
     getCheckpoint: async () => BigInt(Math.floor(Date.now() / 1000)),
     sumRecentSpend: async () => 0n,
     logMismatch: async (proposalId, premiseId, claimedValue, derivedValue) => {
@@ -82,6 +132,41 @@ const AP_VAULT_TARGET_ADDRESS = `0x${'bb'.repeat(20)}` as Address;
 const FRAUDULENT_GLOBEX_PAYOUT_ADDRESS =
   '0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187' as Address;
 
+/**
+ * Mirrors `packages/villain-corpus/site/spoofed-invoice.html`'s `#claimed-evm-identity[data-address]`
+ * literally, the same way as the payout address above. A test in `__tests__/enforce-deps.test.ts`
+ * reads that HTML file and fails if the two drift apart. The value is a REAL OFAC-listed address:
+ * SDN entry 27307 "LAZARUS GROUP" (program DPRK3), "Digital Currency Address - ETH
+ * 0x098B716B8Aaf21512996dC57EB0615e2383E2f96", added 2022-04-14
+ * (https://ofac.treasury.gov/recent-actions/20220414), and present in the live
+ * https://www.treasury.gov/ofac/downloads/sdn.csv, checked 2026-09-26.
+ */
+const CLAIMED_GLOBEX_EVM_IDENTITY = '0x098b716b8aaf21512996dc57eb0615e2383e2f96' as `0x${string}`;
+
+export const PAYEE_EVM_SCREEN_PREMISE_ID = 'p-payee-evm-screen';
+
+/**
+ * `intercepta-risk` / `payment.payTo.traitCount` (Deep Scan `traits.length`), op `lte`, value `'0'`.
+ * No threshold on `toxicScore`, because its range is UNCONFIRMED (VERIFY_FINDINGS item 5). Any
+ * trait counts as a mismatch, because the docs define traits as risk indicators: `traits` is a
+ * "List of suspicious activities detected on the address", `ToxicScoreTraitV2.risk` is "Risk
+ * level of the trait" (https://docs.web3antivirus.io/reference/scan-address.md OAS, fetched
+ * 2026-09-26), and every `name` enum value is a risk category (known_scammer, sanction_address,
+ * mixer_transfers, rug_pull, blacklist, ...; the full list is `DOCUMENTED_TRAIT_NAMES` in
+ * `@bonded/intercepta-adapter`). There is no `holdOnMismatch`: this is a hard refuse. The claimed
+ * value is always `'0'` (the paying agent implicitly asserts the payee has no risk trait).
+ */
+function payeeEvmScreenPremise(claimedPayeeEvmAddress: string): PolicyArtifact['premises'][number] {
+  return {
+    id: PAYEE_EVM_SCREEN_PREMISE_ID,
+    schema: 'intercepta-risk',
+    field: 'payment.payTo.traitCount',
+    op: 'lte',
+    value: '0',
+    args: [claimedPayeeEvmAddress],
+  };
+}
+
 export const DEMO_VENDOR_IDS = ['vnd-globex-freight', 'vnd-suspended-corp', 'vnd-acme-supplies'] as const;
 export type DemoVendorId = (typeof DEMO_VENDOR_IDS)[number];
 
@@ -95,6 +180,12 @@ export interface DemoInvoice {
   /** Human-readable one-liner shown on the inbox/detail pages, not consumed by `enforce()`. */
   scenarioLabel: string;
   claimedPayoutAddress: Address;
+  /**
+   * The payee's claimed EVM identity (20-byte). For globex, this is the spoofed invoice's claim,
+   * and it is screened. For the two key-free invoices, it is the vendor's registered identity on
+   * file, shown for display and not screened by their policies.
+   */
+  claimedPayeeEvmAddress: `0x${string}`;
   claimedInvoiceAmountUSD: string;
   proposal: Proposal;
   policy: PolicyArtifact;
@@ -115,13 +206,17 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
 
   switch (vendorId) {
     case 'vnd-globex-freight': {
-      // Mirrors buildScenario1: the naive AP agent's proposal claims the FRAUDULENT payout
-      // address; the payout-address premise holds for step-up on mismatch instead of hard-
-      // refusing, because a vendor changing its real bank details is itself a legitimate event.
+      // Mirrors villain-corpus's key-gated `buildInterceptaScreenScenario` (full policy): the
+      // spoofed invoice claims a FRAUDULENT payout address AND a sanctioned EVM identity.
+      // ORDER: the Intercepta screen runs FIRST, as a hard refuse. The payout-address premise
+      // (holdOnMismatch) runs second. If the payout premise ran first, the address mismatch would
+      // return HELD_FOR_STEPUP before the screen was reached, and a human could approve paying a
+      // sanctioned identity.
       const policy: PolicyArtifact = {
         version: 1,
         budget: { asset: 'USDC', period: 'daily', max: '100000000000' },
         premises: [
+          payeeEvmScreenPremise(CLAIMED_GLOBEX_EVM_IDENTITY),
           {
             id: 'p-vendor-payout',
             schema: 'issuer-oracle-vendors',
@@ -144,14 +239,21 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
           calldata: '0x',
           valueUSDC: truth.invoiceAmountUSD,
         },
-        premises: [{ premiseId: 'p-vendor-payout', claimedValue: FRAUDULENT_GLOBEX_PAYOUT_ADDRESS }],
+        premises: [
+          { premiseId: PAYEE_EVM_SCREEN_PREMISE_ID, claimedValue: '0' },
+          { premiseId: 'p-vendor-payout', claimedValue: FRAUDULENT_GLOBEX_PAYOUT_ADDRESS },
+        ],
         createdAt: 1_790_200_000,
       };
       return {
         vendorId,
         legalName: truth.legalName,
-        scenarioLabel: 'Vendor claims a new (fraudulent) payout address — held for human step-up review.',
+        scenarioLabel:
+          'Vendor claims a new (fraudulent) payout address and a sanctioned EVM identity. The live Intercepta ' +
+          'screen runs before the payout hold and refuses. Without INTERCEPTA_API_KEY the screen cannot run, ' +
+          'and the payment is refused (fail closed).',
         claimedPayoutAddress: FRAUDULENT_GLOBEX_PAYOUT_ADDRESS,
+        claimedPayeeEvmAddress: CLAIMED_GLOBEX_EVM_IDENTITY,
         claimedInvoiceAmountUSD: truth.invoiceAmountUSD,
         proposal,
         policy,
@@ -159,6 +261,7 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
     }
     case 'vnd-suspended-corp': {
       // Mirrors buildScenario2: a plain (non-hold) vendor.status premise. Hard refuse.
+      // KEY-FREE policy by design: no intercepta-risk premise.
       const policy: PolicyArtifact = {
         version: 1,
         budget: { asset: 'USDC', period: 'daily', max: '100000000000' },
@@ -192,6 +295,7 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
         legalName: truth.legalName,
         scenarioLabel: 'Vendor is claimed active but is suspended on file — hard refused.',
         claimedPayoutAddress: truth.payoutAddress,
+        claimedPayeeEvmAddress: truth.evmAddress,
         claimedInvoiceAmountUSD: truth.invoiceAmountUSD,
         proposal,
         policy,
@@ -199,6 +303,7 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
     }
     case 'vnd-acme-supplies': {
       // Mirrors buildScenario3: a correct, matching claim on both premises. Clears.
+      // KEY-FREE policy by design: no intercepta-risk premise.
       const policy: PolicyArtifact = {
         version: 1,
         budget: { asset: 'USDC', period: 'daily', max: '100000000000' },
@@ -243,6 +348,7 @@ export async function buildDemoInvoice(vendorId: DemoVendorId): Promise<DemoInvo
         legalName: truth.legalName,
         scenarioLabel: 'Correct, matching claim — clears straight through.',
         claimedPayoutAddress: truth.payoutAddress,
+        claimedPayeeEvmAddress: truth.evmAddress,
         claimedInvoiceAmountUSD: truth.invoiceAmountUSD,
         proposal,
         policy,
@@ -291,41 +397,60 @@ export function serializeVerdict(verdict: Verdict): SerializedVerdict {
   };
 }
 
-// ─── Premise diff (claimed vs. derived, every premise, not only the mismatched one) ─
+// ─── Premise diff (claimed vs. derived, for every premise enforce() actually reached) ─
 
 export interface PremiseDiffRow {
   premiseId: string;
   field: string;
   claimedValue: string | null;
   derivedValue: string | null;
+  /** Set when the premise could not be resolved because the adapter threw (e.g. no Intercepta key). */
+  resolveError?: string;
+}
+
+function toRow(
+  def: PolicyArtifact['premises'][number],
+  claimedValue: string | null,
+  derived: bigint | string | null,
+  failure: ResolveFailure | undefined,
+): PremiseDiffRow {
+  return {
+    premiseId: def.id,
+    field: def.field,
+    claimedValue,
+    derivedValue: derived === null ? null : derived.toString(),
+    ...(failure ? { resolveError: `${failure.errorName}: ${failure.message}` } : {}),
+  };
 }
 
 /**
- * Independently re-resolves every premise in `policy`, pairing each with its claimed value,
- * regardless of whether `enforce()` itself reached it. CLAUDE.md rule 5: never a bare claim —
- * show the actual re-derived value for every premise checked, not only the one that mismatched.
- *
- * Safe for these three demo policies specifically because `enforce()` (see `enforce.ts`) always
- * reaches every premise in each of them: the globex/suspended-corp policies have exactly one
- * premise, and the acme-supplies policy's two premises both pass (so evaluation never stops
- * early). A policy where an earlier premise hard-mismatches before a later one is ever resolved
- * would need this function to stop at the same point `enforce()` did, to avoid claiming a
- * "derived" value for a premise that was never actually checked.
+ * Independently re-resolves the premises, in the proposal's order, pairing each with its
+ * claimed value, and STOPS exactly where `enforce()` stops: after the first premise that is
+ * unresolvable or mismatches. CLAUDE.md rule 5: never a bare claim. No derived value is shown
+ * for a premise `enforce()` never reached. Uses the fail-closed registry, so an unscreenable
+ * Intercepta premise becomes a row with `derivedValue: null` and a `resolveError`, not a thrown
+ * request.
  */
 export async function buildPremiseDiffs(policy: PolicyArtifact, proposal: Proposal, at: bigint): Promise<PremiseDiffRow[]> {
-  const resolvePremise = createResolvePremise(registry);
-  return Promise.all(
-    policy.premises.map(async (def) => {
-      const claim = proposal.premises.find((p) => p.premiseId === def.id);
-      const derived = await resolvePremise(def, at);
-      return {
-        premiseId: def.id,
-        field: def.field,
-        claimedValue: claim?.claimedValue ?? null,
-        derivedValue: derived === null ? null : derived.toString(),
-      };
-    }),
-  );
+  const failures: ResolveFailure[] = [];
+  const resolvePremise = createResolvePremise(buildRegistry(failures));
+  const rows: PremiseDiffRow[] = [];
+  for (const claim of proposal.premises) {
+    const def = policy.premises.find((p) => p.id === claim.premiseId);
+    if (!def) break; // enforce() refuses PREMISE_UNRESOLVABLE here
+    const before = failures.length;
+    const derived = await resolvePremise(def, at);
+    rows.push(toRow(def, claim.claimedValue, derived, failures[before]));
+    if (derived === null) break;
+    let ok: boolean;
+    try {
+      ok = evaluatePremise(def, claim.claimedValue, derived);
+    } catch {
+      ok = false;
+    }
+    if (!ok) break;
+  }
+  return rows;
 }
 
 // ─── Combined run + API response shape, shared by /api/enforce and /api/stepup ─
@@ -338,6 +463,8 @@ export interface EnforceApiResponse {
   verdict: SerializedVerdict;
   premises: PremiseDiffRow[];
   mismatches: MismatchRecord[];
+  /** Every screen that could not be resolved, with its exact error (e.g. InterceptaKeyMissingError). */
+  screeningErrors: ResolveFailure[];
 }
 
 export interface EnforceRunResult {
@@ -345,18 +472,37 @@ export interface EnforceRunResult {
   onchainPolicyHash: Hash32;
   verdict: Verdict;
   mismatches: MismatchRecord[];
+  /** Exactly the premises `enforce()` resolved, in order, with the value it resolved. */
   premises: PremiseDiffRow[];
+  screeningErrors: ResolveFailure[];
 }
 
-/** Builds the demo invoice, runs the real `enforce()`, and derives the full premise diff — the one call both `/api/enforce` and `/api/stepup` use. */
+/**
+ * Builds the demo invoice, runs the real `enforce()`, and records the premise diff — the one
+ * call both `/api/enforce` and `/api/stepup` use. The diff rows are the values `enforce()`
+ * itself resolved (captured by wrapping `resolvePremise`), not a second resolution. So a live
+ * Intercepta screen is called once per request, not twice, and the rows stop exactly where
+ * `enforce()` stopped.
+ */
 export async function runEnforceForInvoice(vendorId: DemoVendorId): Promise<EnforceRunResult> {
   const invoice = await buildDemoInvoice(vendorId);
   const onchainPolicyHash = canonicalHash(invoice.policy);
   const mismatches: MismatchRecord[] = [];
-  const deps = buildConsoleEnforceDeps(mismatches);
+  const screeningErrors: ResolveFailure[] = [];
+  const baseDeps = buildConsoleEnforceDeps(mismatches, screeningErrors);
+  const premises: PremiseDiffRow[] = [];
+  const deps: EnforceDeps = {
+    ...baseDeps,
+    resolvePremise: async (def, at) => {
+      const before = screeningErrors.length;
+      const derived = await baseDeps.resolvePremise(def, at);
+      const claim = invoice.proposal.premises.find((p) => p.premiseId === def.id);
+      premises.push(toRow(def, claim?.claimedValue ?? null, derived, screeningErrors[before]));
+      return derived;
+    },
+  };
   const verdict = await enforce(invoice.proposal, invoice.policy, onchainPolicyHash, deps);
-  const premises = await buildPremiseDiffs(invoice.policy, invoice.proposal, verdict.blockChecked);
-  return { invoice, onchainPolicyHash, verdict, mismatches, premises };
+  return { invoice, onchainPolicyHash, verdict, mismatches, premises, screeningErrors };
 }
 
 export function toApiResponse(result: EnforceRunResult): EnforceApiResponse {
@@ -368,6 +514,7 @@ export function toApiResponse(result: EnforceRunResult): EnforceApiResponse {
     verdict: serializeVerdict(result.verdict),
     premises: result.premises,
     mismatches: result.mismatches,
+    screeningErrors: result.screeningErrors,
   };
 }
 

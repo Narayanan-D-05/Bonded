@@ -49,7 +49,7 @@ export function createServer(): McpServer {
     {
       title: 'Verify vendor invoice payment (BEC / AP fraud check)',
       description:
-        "Before an AP agent pays a vendor invoice, independently re-derives the vendor's true payout address, invoice amount, and account status from the disclosed vendor-master oracle, and returns a CLEARED / REFUSED / HELD_FOR_STEPUP verdict plus the exact claimed-vs-derived evidence for any mismatch. A payout-address mismatch is held for human step-up review (a vendor changing its real bank details is not itself fraud); a suspended-vendor or invoice-amount mismatch beyond a 0.5% tolerance is refused outright. See this package's verify-invoice-payment.ts for the full policy rationale.",
+        "Before an AP agent pays a vendor invoice, independently re-derives the vendor's true payout address, invoice amount, and account status from the disclosed vendor-master oracle, and returns a CLEARED / REFUSED / HELD_FOR_STEPUP verdict plus the exact claimed-vs-derived evidence for any mismatch. A payout-address mismatch is held for human step-up review (a vendor changing its real bank details is not itself fraud); a suspended-vendor or invoice-amount mismatch beyond a 0.5% tolerance is refused outright. If the optional claimedPayeeEvmAddress (the payee's 20-byte EVM identity) is given, it is screened live through Intercepta before the payout-address check: any documented risk trait refuses the payment, and a missing INTERCEPTA_API_KEY or a failed screen also refuses it (fail closed), with the error returned in screeningErrors. See this package's verify-invoice-payment.ts for the full policy rationale.",
       inputSchema: verifyInvoicePaymentInputShape,
     },
     async (args: VerifyInvoicePaymentInput) => {
