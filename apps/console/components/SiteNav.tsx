@@ -1,7 +1,9 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import bondedLogo from '../app/main_logo/bonded_logo.png';
 
 const LINKS = [
   { href: '/', label: 'Overview', match: (p: string) => p === '/' },
@@ -10,15 +12,9 @@ const LINKS = [
   { href: '/activity', label: 'Activity', match: (p: string) => p.startsWith('/activity') },
 ] as const;
 
-/** The seal mark: two concentric rings and a bar, drawn, not a logo of anyone else's. */
-function SealMark() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" className="shrink-0 text-manifest">
-      <circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1.6" />
-      <rect x="7" y="11" width="10" height="2" fill="currentColor" />
-    </svg>
-  );
+/** The project logo (app/main_logo/bonded_logo.png), served resized by next/image. */
+function LogoMark() {
+  return <Image src={bondedLogo} alt="" width={28} height={28} priority className="h-7 w-7 shrink-0 rounded-md" />;
 }
 
 /** Top navigation: the Bonded wordmark, the four sections, and the network badge. */
@@ -28,7 +24,7 @@ export function SiteNav() {
     <header className="border-b border-hairline bg-harbor/95">
       <div className="mx-auto flex max-w-content flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
         <Link href="/" className="flex items-center gap-2.5" aria-label="Bonded, overview">
-          <SealMark />
+          <LogoMark />
           <span className="text-lg font-semibold tracking-tight text-manifest">Bonded</span>
         </Link>
         <span className="order-2 ml-auto inline-flex items-center gap-1.5 rounded-full border border-hairline px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-fog sm:order-3">
