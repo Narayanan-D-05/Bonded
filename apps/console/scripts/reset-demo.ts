@@ -4,6 +4,7 @@
  *   pnpm --filter @bonded/console demo:reset                 # archive state + fresh vault (default 40,000 USDSUI)
  *   pnpm --filter @bonded/console demo:reset -- --fund 60000 # choose how much USDSUI to put in the new vault
  *   pnpm --filter @bonded/console demo:reset -- --keep-vault # only archive the local state, no chain calls
+ *   pnpm --filter @bonded/console demo:reset -- --no-agent   # skip the automatic AP agent run at the end
  *
  * What "from the start" needs, and why each step exists:
  *  1. Local demo state is ARCHIVED (moved, never deleted) to .data/archive/<timestamp>/:
@@ -120,22 +121,24 @@ function setRootEnv(name: string, value: string): void {
   writeFileSync(ROOT_ENV, next);
 }
 
-function parseArgs(argv: string[]): { keepVault: boolean; fundUsdsui: bigint } {
+function parseArgs(argv: string[]): { keepVault: boolean; fundUsdsui: bigint; runAgent: boolean } {
   let keepVault = false;
+  let runAgent = true;
   let fundUsdsui = 40_000n;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--keep-vault') keepVault = true;
+    else if (argv[i] === '--no-agent') runAgent = false;
     else if (argv[i] === '--fund') {
       const v = argv[++i] ?? '';
       if (!/^[1-9][0-9]{0,9}$/.test(v)) throw new Error('--fund takes a whole number of USDSUI, e.g. --fund 40000');
       fundUsdsui = BigInt(v);
     }
   }
-  return { keepVault, fundUsdsui };
+  return { keepVault, fundUsdsui, runAgent };
 }
 
-function main(): void {
-  const { keepVault, fundUsdsui } = parseArgs(process.argv.slice(2));
+async function main(): Promise<void> {
+  const { keepVault, fundUsdsui, runAgent } = parseArgs(process.argv.slice(2));
   loadRootEnv();
 
   console.log('1) Archiving local demo state');
@@ -171,7 +174,15 @@ function main(): void {
 
     console.log('4) Pointing the app at the new vault');
     setRootEnv('SUI_VAULT_ID', vaultId);
+    process.env.SUI_VAULT_ID = vaultId; // this process already loaded the old value
     console.log(`  SUI_VAULT_ID updated in ${ROOT_ENV}`);
+  }
+
+  if (runAgent) {
+    console.log('5) The AP agent reviews every invoice (pays cleared ones; refused and held ones wait)');
+    const { loadAgentEnv, runAgentOverInbox } = await import('./run-agent');
+    loadAgentEnv();
+    await runAgentOverInbox();
   }
 
   console.log(`
@@ -179,12 +190,12 @@ Done. Next:
   - Restart the console (Ctrl+C, then: pnpm --filter @bonded/console dev) so it reads the new vault.
   - IDKit: World allows one verification per person per action, so in the Simulator use a
     NEW identity for the vendor verification (the previous identity will be rejected).
-  - Every invoice is now "Awaiting agent" again; the two bank-change invoices will HOLD.`);
+  - The agent has already reviewed the inbox: only the HELD invoices need a person
+    (the two bank changes and the $15,000 invoice). Run the agent again any time with
+    pnpm --filter @bonded/console demo:agent`);
 }
 
-try {
-  main();
-} catch (err) {
+main().catch((err: unknown) => {
   console.error(`\nReset stopped: ${err instanceof Error ? err.message : String(err)}`);
   process.exitCode = 1;
-}
+});

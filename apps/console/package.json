@@ -12,7 +12,8 @@
     "clean": "rm -rf .next dist-test",
     "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs",
     "commit:policy": "tsx scripts/commit-ap-policy.ts",
-    "demo:reset": "tsx scripts/reset-demo.ts"
+    "demo:reset": "tsx scripts/reset-demo.ts",
+    "demo:agent": "tsx scripts/run-agent.ts"
   },
   "dependencies": {
     "@bonded/dispatcher": "workspace:*",
