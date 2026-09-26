@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bonded Architecture</title>
+<!-- Source for docs/architecture/architecture.png (rendered with headless Chrome at 2x). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=block" rel="stylesheet">
+<style>
+  :root {
+    --navy: #0B1B33; --slate: #475569; --blue: #1A63BF; --sui: #4DA2FF;
+    --rule: #DCEBFF; --band: #F4F9FF;
+    --green: #047857; --amber: #92400E; --red: #B91C1C;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1800px; height: 1110px; overflow: hidden; }
+  body {
+    font-family: 'Instrument Sans', system-ui, sans-serif; color: var(--navy);
+    background:
+      radial-gradient(900px 420px at 88% -8%, rgba(77,162,255,.22), transparent 60%),
+      radial-gradient(700px 380px at -6% 108%, rgba(77,162,255,.14), transparent 60%),
+      linear-gradient(180deg, #fff 0%, var(--band) 100%);
+    position: relative;
+  }
+  .grid { position: absolute; inset: 0; background-image:
+      linear-gradient(rgba(26,99,191,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26,99,191,.05) 1px, transparent 1px);
+    background-size: 40px 40px; }
+  .abs { position: absolute; }
+  h1 { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 44px; letter-spacing: -.03em; }
+  .sub { font-size: 19px; color: var(--slate); margin-top: 4px; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); }
+  .card {
+    position: absolute; background: #fff; border: 1.5px solid var(--rule); border-radius: 20px;
+    box-shadow: 0 18px 40px -22px rgba(26,99,191,.45); padding: 18px 20px;
+  }
+  .card h3 { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 21px; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+  .card p { font-size: 15px; line-height: 1.4; color: var(--slate); margin-top: 6px; }
+  .card p b { color: var(--navy); font-weight: 600; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; }
+  .logo.lg { width: 40px; height: 40px; border-radius: 10px; }
+  .tag { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #EAF4FF; color: var(--blue); margin-top: 8px; }
+  .enforcer {
+    position: absolute; left: 470px; top: 176px; width: 640px; height: 660px; border-radius: 28px;
+    background: linear-gradient(180deg, #fff, #F7FBFF); border: 2px solid var(--sui);
+    box-shadow: 0 30px 70px -30px rgba(26,99,191,.55);
+  }
+  .enf-head { display: flex; align-items: center; gap: 14px; padding: 22px 26px 12px; }
+  .enf-head img { width: 52px; height: 52px; border-radius: 12px; }
+  .enf-head h2 { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 28px; letter-spacing: -.03em; }
+  .enf-head .code { font-family: 'JetBrains Mono', monospace; font-size: 15px; color: var(--blue); }
+  .step {
+    position: absolute; left: 26px; width: 588px; height: 92px; border-radius: 16px;
+    background: #fff; border: 1.5px solid var(--rule); display: flex; align-items: center; gap: 16px; padding: 0 18px;
+  }
+  .num { width: 38px; height: 38px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700;
+    display: grid; place-items: center; font-family: 'Bricolage Grotesque', sans-serif; font-size: 19px; flex-shrink: 0; }
+  .step .t { flex: 1; }
+  .step h4 { font-family: 'Bricolage Grotesque', sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
+  .step p { font-size: 14.5px; color: var(--slate); line-height: 1.35; margin-top: 2px; }
+  .step .src { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11.5px; color: var(--slate); font-weight: 600; width: 74px; }
+  .verdict { border-width: 2px; }
+  .verdict .pill { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 500; letter-spacing: .12em; padding: 4px 12px; border-radius: 999px; color: #fff; }
+  .v-green { border-color: #A7E3CB; } .v-green .pill { background: var(--green); }
+  .v-amber { border-color: #F3CF9B; } .v-amber .pill { background: var(--amber); }
+  .v-red { border-color: #F2B8B8; } .v-red .pill { background: var(--red); }
+  .sub-box { margin-top: 10px; border-radius: 12px; background: var(--band); border: 1px solid var(--rule); padding: 10px 12px; display: flex; gap: 10px; align-items: center; font-size: 14.5px; color: var(--navy); line-height: 1.35; }
+  .band-label { position: absolute; font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--blue); }
+  svg.arrows { position: absolute; inset: 0; width: 1800px; height: 1110px; pointer-events: none; }
+  .alabel { font-family: 'Instrument Sans', sans-serif; font-size: 13.5px; font-weight: 600; fill: var(--blue); }
+</style>
+</head>
+<body>
+<div class="grid"></div>
+
+<!-- Header -->
+<div class="abs" style="left:60px; top:44px; display:flex; align-items:center; gap:18px;">
+  <img src="../../apps/console/app/main_logo/bonded_logo.png" style="width:64px;height:64px;border-radius:14px" alt="">
+  <div>
+    <h1>Bonded: how it works</h1>
+    <div class="sub">Pre-payment verification for AI accounts-payable agents. Every fact is re-checked before money moves.</div>
+  </div>
+</div>
+<div class="abs" style="right:60px; top:58px; display:flex; align-items:center; gap:22px; font-weight:600; color:var(--slate); font-size:15px;">
+  <span style="display:flex;align-items:center;gap:8px"><img class="logo" src="../../apps/console/app/sponsor_logos/intercepta.png" alt="">Intercepta</span>
+  <span style="display:flex;align-items:center;gap:8px"><img class="logo" src="../../apps/console/app/sponsor_logos/world.png" alt="">World</span>
+  <span style="display:flex;align-items:center;gap:8px"><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt="">Sui</span>
+</div>
+
+<!-- Column labels -->
+<div class="band-label" style="left:60px; top:150px;">1 · Payment request</div>
+<div class="band-label" style="left:470px; top:150px;">2 · Independent re-check</div>
+<div class="band-label" style="left:1190px; top:150px;">3 · Verdict &amp; settlement</div>
+
+<!-- Column 1: inputs -->
+<div class="card" style="left:60px; top:180px; width:340px; height:150px;">
+  <h3>✉️ Vendor invoice / email</h3>
+  <p>Claims the vendor, <b>payout address</b> and <b>amount</b>. May be spoofed: "we changed our bank account" (BEC).</p>
+</div>
+<div class="card" style="left:60px; top:390px; width:340px; height:160px;">
+  <h3>🤖 AI accounts-payable agent</h3>
+  <p>Reads the invoice and <b>proposes</b> a payment. It never moves money itself: every proposal goes through Bonded.</p>
+  <span class="tag">SDK enforce() · MCP tool</span>
+</div>
+<div class="card" style="left:60px; top:610px; width:340px; height:226px;">
+  <h3><img class="logo" src="../../apps/console/app/sponsor_logos/world.png" alt="">Vendor portal</h3>
+  <p>A real vendor changing bank details must prove they are a <b>unique human with World ID</b> (IDKit, verified server-side).</p>
+  <div class="sub-box" style="display:block">Only then is the new address written to the <b>vendor master</b>, and it still counts as a recent change.</div>
+</div>
+
+<!-- Column 2: enforcer -->
+<div class="enforcer">
+  <div class="enf-head">
+    <img src="../../apps/console/app/main_logo/bonded_logo.png" alt="">
+    <div><h2>Bonded enforcer</h2><div class="code">enforce(proposal) → Verdict</div></div>
+  </div>
+  <div class="step" style="top:96px;">
+    <div class="num">1</div>
+    <div class="t"><h4>Policy check</h4><p>The agent's policy hash must match the one committed on-chain.</p></div>
+    <div class="src"><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt="">Sui registry</div>
+  </div>
+  <div class="step" style="top:206px;">
+    <div class="num">2</div>
+    <div class="t"><h4>Re-derive every premise</h4><p>Payout address, amount and vendor status fetched from the source of truth, never from the invoice.</p></div>
+    <div class="src"><img class="logo" src="../../apps/console/app/main_logo/bonded_logo.png" alt="">Vendor master</div>
+  </div>
+  <div class="step" style="top:316px;">
+    <div class="num">3</div>
+    <div class="t"><h4>Screen the payout address</h4><p>Live risk scan: sanctions (OFAC), scams, toxic history. Evidence stored by hash.</p></div>
+    <div class="src"><img class="logo" src="../../apps/console/app/sponsor_logos/intercepta.png" alt="">Intercepta</div>
+  </div>
+  <div class="step" style="top:426px;">
+    <div class="num">4</div>
+    <div class="t"><h4>Budget</h4><p>The vault's on-chain spend plus this payment must stay within the policy budget.</p></div>
+    <div class="src"><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt="">Sui vault</div>
+  </div>
+  <div class="step" style="top:536px;">
+    <div class="num">5</div>
+    <div class="t"><h4>Irreversibility gate</h4><p>Large payment or recently changed bank details → needs a verified human.</p></div>
+    <div class="src"><img class="logo" src="../../apps/console/app/sponsor_logos/world.png" alt="">World ID</div>
+  </div>
+</div>
+
+<!-- Column 3: verdicts -->
+<div class="card verdict v-green" style="left:1190px; top:180px; width:550px; height:196px;">
+  <h3><span class="pill">CLEARED</span> Paid automatically</h3>
+  <p>Every re-derived fact matches the invoice.</p>
+  <div class="sub-box"><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt=""><span><b>settle()</b> consumes the on-chain Verdict object and moves USDSUI from the vault to the vendor.</span></div>
+</div>
+<div class="card verdict v-amber" style="left:1190px; top:406px; width:550px; height:246px;">
+  <h3><span class="pill">HELD</span> Waits for a verified human</h3>
+  <p>Only the genuinely ambiguous case: recent bank change or a large irreversible payment.</p>
+  <div class="sub-box"><img class="logo" src="../../apps/console/app/sponsor_logos/world.png" alt=""><span><b>World ID for Agents</b> step-up: a fresh human verification, valid for 5 minutes.</span></div>
+  <div class="sub-box"><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt=""><span><b>settle_with_stepup()</b> pays only with that proof.</span></div>
+</div>
+<div class="card verdict v-red" style="left:1190px; top:682px; width:550px; height:154px;">
+  <h3><span class="pill">REFUSED</span> Nothing is paid</h3>
+  <p>A fact doesn't match or the address is risky. The refusal shows the <b>claimed value next to the real one</b>, never a bare "no".</p>
+</div>
+
+<!-- Bottom band: audit & delivery -->
+<div class="band-label" style="left:60px; top:880px;">4 · Proof &amp; integration</div>
+<div class="card" style="left:60px; top:910px; width:400px; height:150px;">
+  <h3><img class="logo" src="../../apps/console/app/sponsor_logos/sui.png" alt="">On-chain audit trail</h3>
+  <p>Policy hash, Verdict objects and every USDSUI payment live on <b>Sui testnet</b>, linkable on Suiscan.</p>
+</div>
+<div class="card" style="left:490px; top:910px; width:400px; height:150px;">
+  <h3><img class="logo" src="../../apps/console/app/sponsor_logos/intercepta.png" alt="">Screening evidence</h3>
+  <p>Each Intercepta response is stored and referenced by its <b>sha256 hash</b>, so a refusal can be audited later.</p>
+</div>
+<div class="card" style="left:920px; top:910px; width:400px; height:150px;">
+  <h3><img class="logo" src="../../apps/console/app/main_logo/bonded_logo.png" alt="">Bonded console</h3>
+  <p>Invoice inbox, premise-diff review, vendor portal and activity. People only open the <b>held</b> invoices.</p>
+</div>
+<div class="card" style="left:1350px; top:910px; width:390px; height:150px;">
+  <h3>🧩 Plug-in delivery</h3>
+  <p>Any AP platform adds Bonded before its own payment step: <b>SDK</b> <code class="mono" style="font-size:13px;letter-spacing:0;text-transform:none">enforce()</code> or the <b>MCP server</b> tool for agent frameworks.</p>
+</div>
+
+<!-- Arrows -->
+<svg class="arrows" viewBox="0 0 1800 1110">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1A63BF"/>
+    </marker>
+    <marker id="ahg" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#047857"/></marker>
+    <marker id="aha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#92400E"/></marker>
+    <marker id="ahr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#B91C1C"/></marker>
+  </defs>
+  <g fill="none" stroke-width="2.5" stroke-linecap="round">
+    <!-- invoice -> agent -->
+    <path d="M230 332 L230 386" stroke="#1A63BF" marker-end="url(#ah)"/>
+    <text class="alabel" x="242" y="364">reads</text>
+    <!-- agent -> enforcer -->
+    <path d="M402 410 L466 410" stroke="#1A63BF" marker-end="url(#ah)"/>
+    <text class="alabel" x="404" y="400">proposes</text>
+    <!-- vendor portal -> vendor master (step 2) -->
+    <path d="M402 700 C 440 700, 440 446, 466 446" stroke="#1A63BF" stroke-dasharray="7 6" marker-end="url(#ah)"/>
+    <text class="alabel" x="422" y="575" text-anchor="middle" transform="rotate(-90 422 575)">verified change</text>
+    <!-- enforcer -> verdicts -->
+    <path d="M1112 500 C 1150 500, 1150 278, 1186 278" stroke="#047857" marker-end="url(#ahg)"/>
+    <path d="M1112 510 C 1150 510, 1150 529, 1186 529" stroke="#92400E" marker-end="url(#aha)"/>
+    <path d="M1112 520 C 1150 520, 1150 759, 1186 759" stroke="#B91C1C" marker-end="url(#ahr)"/>
+    <!-- held -> settle after step-up (loop into cleared) -->
+    <!-- enforcer -> audit band -->
+    <path d="M790 838 L790 904" stroke="#1A63BF" stroke-dasharray="7 6" marker-end="url(#ah)"/>
+    <text class="alabel" x="802" y="876">every verdict recorded</text>
+    <path d="M1465 838 L1465 904" stroke="#1A63BF" stroke-dasharray="7 6" marker-end="url(#ah)"/>
+    <text class="alabel" x="1477" y="876">payments on Sui</text>
+  </g>
+</svg>
+
+<div class="abs" style="left:60px; bottom:18px; font-size:13px; color:var(--slate);">
+  The vendor master is a disclosed fixture standing in for a real ERP / vendor system. Sui, Intercepta and World calls are live (Sui testnet).
+</div>
+</body>
+</html>
