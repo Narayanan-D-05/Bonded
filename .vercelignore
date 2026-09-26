@@ -1,0 +1,14 @@
+# Never upload secrets or local demo state.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+.data
+**/.data
+node_modules
+**/node_modules
+**/.next
+.git
+sponsers
+reference

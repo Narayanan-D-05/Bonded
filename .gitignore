@@ -64,3 +64,5 @@ apps/console/components.json
 
 # Move build output
 move/bonded/build/
+
+.vercel

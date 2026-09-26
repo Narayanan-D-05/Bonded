@@ -176,6 +176,9 @@ export function assertVerifiedVendorBankChangeRequest(value: unknown): asserts v
 
 /** `<workspace root>/.data/vendor-bank-change-requests.json` (the root holds pnpm-workspace.yaml). */
 export function defaultVendorRequestStorePath(from: string = process.cwd()): string {
+  // Explicit path, e.g. on a host with no workspace checkout (Vercel), same rule as the ledger.
+  const override = process.env['BONDED_VENDOR_REQUESTS']?.trim();
+  if (override) return path.resolve(override);
   let dir = path.resolve(from);
   for (;;) {
     if (existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return path.join(dir, '.data', 'vendor-bank-change-requests.json');
