@@ -89,6 +89,7 @@ import { AP_AGENT_ADDRESS, AP_AGENT_POLICY, AP_VAULT_TARGET_ADDRESS } from './ap
 import { IDKIT_ENV } from './idkit';
 import { SettlementLedger } from './settlement-ledger';
 import { defaultVendorRequestStorePath, fileVendorRequestStore, type VendorRequestStore } from './vendor-bank-change';
+import { recordVerdict, type VerdictLogEntry } from './verdict-log';
 
 // ─── Context: chain, vendor master, ledger ─────────────────────────────────
 
@@ -117,6 +118,12 @@ export interface ConsoleContext {
    * so no test ever has to pretend Intercepta answered.
    */
   buildInvoice?: (invoiceId: DemoInvoiceId, vendorSource: VendorSource) => Promise<DemoInvoice>;
+  /**
+   * Records the agent's latest verdict per invoice for the Invoice Inbox (display only; see
+   * lib/verdict-log.ts). Set by `defaultConsoleContext`; unit-test contexts leave it unset, so
+   * tests never write into the real `.data/` folder.
+   */
+  recordVerdict?: (entry: VerdictLogEntry) => Promise<void>;
 }
 
 /** The real `@bonded/sui-settlement` calls, reading SUI_* from `process.env`. */
@@ -139,6 +146,7 @@ export function defaultConsoleContext(): ConsoleContext {
       ledger: new SettlementLedger(),
       writeBankChange: createVendorMasterBankChangeWriter(process.env, { changeLogPath }),
       vendorRequests: fileVendorRequestStore(defaultVendorRequestStorePath()),
+      recordVerdict: (entry) => recordVerdict(entry),
     };
   }
   return defaultContext;

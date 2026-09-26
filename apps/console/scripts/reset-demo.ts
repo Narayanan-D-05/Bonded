@@ -8,6 +8,7 @@
  * What "from the start" needs, and why each step exists:
  *  1. Local demo state is ARCHIVED (moved, never deleted) to .data/archive/<timestamp>/:
  *     - .data/console/settlements.json          the pay-once ledger ("Already paid")
+ *     - .data/console/verdicts.json             the agent's latest verdict per invoice (inbox status)
  *     - .data/vendor-master-changes.json        approved bank changes (else the bank-change
  *                                               invoices would clear straight away, not hold)
  *     - .data/vendor-bank-change-requests.json  IDKit-verified vendor requests
@@ -34,6 +35,7 @@ const ROOT_ENV = join(REPO_ROOT, '.env');
 
 const STATE_FILES = [
   'console/settlements.json',
+  'console/verdicts.json',
   'vendor-master-changes.json',
   'vendor-bank-change-requests.json',
   'world-agents/stepup-store.json',

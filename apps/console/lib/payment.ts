@@ -138,6 +138,21 @@ async function settleClearedOnce(run: EnforceRunResult, ctx: ConsoleContext): Pr
 /** `POST /api/enforce`: the AP agent proposes paying `invoiceId`. CLEARED settles (once). */
 export async function proposePayment(invoiceId: DemoInvoiceId, ctx: ConsoleContext = defaultConsoleContext()): Promise<EnforceApiResponse> {
   const run = await runEnforceForInvoice(invoiceId, ctx);
+  // Display state for the Invoice Inbox ("Refused" / "Held" instead of "Awaiting agent").
+  // Best effort: a failure to write it must never block or change the payment decision.
+  if (ctx.recordVerdict) {
+    try {
+      await ctx.recordVerdict({
+        invoiceId,
+        proposalHash: run.verdict.proposalHash,
+        outcomeLabel: serializeVerdict(run.verdict).outcomeLabel,
+        reasonCodeLabel: serializeVerdict(run.verdict).reasonCodeLabel,
+        reviewedAtMs: Date.now(),
+      });
+    } catch (error) {
+      console.error('verdict log not written (display only):', error);
+    }
+  }
   if (run.verdict.outcome === 0) return apiResponse(run, await settleClearedOnce(run, ctx));
   // Not CLEARED now: still show a payment already made for this proposal (e.g. via step-up).
   const prior = await ctx.ledger.get(run.verdict.proposalHash);
