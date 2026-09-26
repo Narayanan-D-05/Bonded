@@ -121,3 +121,48 @@ and the per-publish 0.3 SUI dry-run gate (the publish dry-run alone was 0.029 SU
 Not exercised live on-chain (covered instead by the 12 Move unit tests, two of which are
 mutation-tested — see below): `settle_with_stepup`'s success path and its proposal-hash-mismatch
 abort; `commit_policy`'s cap gate and forward-only overwrite.
+
+---
+
+## Auto-settlement (sui-settlement package)
+
+2026-09-26. `packages/sui-settlement` (`@bonded/sui-settlement`) submits the real settlement for an
+`enforce()` verdict by shelling out to `sui client ptb ... --json` (`execFile` with an argument array,
+signed by the CLI keystore; TypeScript never reads key bytes). It reads every result back over gRPC
+(`SuiGrpcClient`, `@mysten/sui` 2.33.1). Same package, vault, registry and EnforcerCap as the
+Commerce Edition section above. Nothing was republished. Signer / active address:
+`0x916c7accd3308e4a8ec896b51b2a0bbcd510abff0579c059455b7e30d147f05a`. Network: testnet only.
+
+### Vault funding: USDSUI mint
+
+The vault held 4 USDSUI (4,000,000 base units), not enough for the $1,250 (`vnd-acme-supplies`) and
+$8,450 (`vnd-globex-freight`) demo invoices. The active address owns the correct coin's `TreasuryCap`
+(`0x9de96939d2ed17528acbec3abffefcc6e9a14bd79640b54317b49b9ea574316b`,
+`TreasuryCap<0x832f9372…54cb::usdsui::USDSUI>`, checked with `sui client object`). The coin's own
+`usdsui` module exposes only `init`; there's no mint function, confirmed by querying the package's
+functions over GraphQL. Minting therefore went through the framework:
+`0x2::coin::mint<T>(&mut TreasuryCap<T>, u64, &mut TxContext): Coin<T>` (signature read from
+testnet's `0x2` package over GraphQL, not from memory). The minted coin went straight into
+`bonded_vault::fund_vault` in the same PTB, dry-run first. The unrelated `0x8f838f20…::usdsui::USDSUI`
+was not touched.
+
+| Step | Digest | Result | Gas (MIST) |
+|---|---|---|---|
+| `coin::mint<USDSUI>` 20,000 USDSUI (20,000,000,000 base units) + `fund_vault`, one PTB | `3bFBZibHQoW2fyZ2L7PqCsusxMo6HUt2cRBvSfEDK2s4` ([explorer](https://suiscan.xyz/testnet/tx/3bFBZibHQoW2fyZ2L7PqCsusxMo6HUt2cRBvSfEDK2s4)) | Vault balance 4,000,000 → **20,004,000,000**; USDSUI total supply 43,000,000,000 → 63,000,000,000 | 1,000,000 + 4,529,600 − 4,484,304 = **1,045,296** |
+
+### Live runs (`pnpm --filter @bonded/sui-settlement live:testnet`)
+
+| Step | Digest | Result | Gas (MIST) |
+|---|---|---|---|
+| `commitPolicy(0xaaaa…aa, 0xf372ffa8…0eea)`: the acme demo policy's `canonicalHash` into `BondedRegistry` | `6p3uSWubGhPf84fKYLTcDwcTpEzBmuc2NELoUab1HLE1` ([explorer](https://suiscan.xyz/testnet/tx/6p3uSWubGhPf84fKYLTcDwcTpEzBmuc2NELoUab1HLE1)) | Registry key `0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` (the demo agent's 20-byte address, zero-left-padded to a Sui `address`). `readPolicyHash` (gRPC simulate of `has_policy_hash`/`current_policy_hash`) read back `0xf372ffa84e65a92ffddc618578509d9d56ad7d23b7385614d45d36aa6df10eea`. It was `null` before | **2,887,536** |
+| `settleCleared`: acme invoice, `mint_verdict` (outcome 0, reason 0, 1,250,000,000) + `settle`, one PTB | `A4xfzgQW6YJatYtQuaNX43xgJ5tzXKVTY5s6f72TxoJL` ([explorer](https://suiscan.xyz/testnet/tx/A4xfzgQW6YJatYtQuaNX43xgJ5tzXKVTY5s6f72TxoJL)) | The verdict came from the real `enforce()`, run with `onchainPolicyHash` read from the registry (not recomputed locally): CLEARED/OK, proposal `0x3333…33`. Recipient = acme's vendor-master payout address `0x4d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0`, re-derived via `deriveVendorRecipient`. One `Settled` event (BCS-decoded): vault = ours, recipient = acme, `value_usdc` 1,250,000,000, `spent_this_period` 1,251,000,000, `via_stepup` false. Fullnode `balanceChanges` for the recipient: **+1,250,000,000**. New `Coin<USDSUI>` `0x4e127fb7143d1564157ee54ae66f3c1628435c234bf8bb9447e589c4cb8b4921`, owned by the recipient, balance **1,250,000,000** (read over gRPC and again via `sui client object`). Recipient `getBalance`: 0 → 1,250,000,000 (delta exactly 1,250,000,000). Vault: 20,004,000,000 → 18,754,000,000 | **2,394,448** |
+
+**Total SUI spent by this section:** 1,045,296 + 2,887,536 + 2,394,448 = **6,327,280 MIST (0.0063 SUI)**,
+against a 0.3 SUI cap. Sender SUI: 934,975,068 MIST before the mint → 928,647,788 MIST after.
+
+**Not run live: `settleWithStepUp`.** A real `StepUpApproval` requires a real World ID verification,
+and the World sandbox credentials (`WORLD_SANDBOX_CLIENT_ID`/`_SECRET`/`WORLD_REDIRECT_URI`) don't
+exist yet. Minting one without a real verification would fake the human step. The gating logic is
+covered by unit tests only: it refuses hand-built, uncertified, denied, stale, and wrong-proposal
+approvals before any config load or CLI call. The live `settle_with_stepup` run waits on World
+credentials. The vault holds 18,754 USDSUI, enough for the $8,450 globex invoice when that happens.

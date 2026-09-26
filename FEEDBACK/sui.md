@@ -186,3 +186,41 @@ verifiable on-chain, but is no longer reachable via `git log`.
   straight to `settle` (skipping `settle_with_stepup`) aborted exactly as designed:
   `MoveAbort(..., function_name: Some("settle") ..., 0)` — abort code `0` is
   `EHeldForStepupNotSettleableDirectly`, and the dry run cost no gas.
+
+## 2026-09-26 — Auto-settlement package (`@bonded/sui-settlement`)
+
+- **`sui client ptb --dry-run --json` ignores `--json`.** A real `ptb ... --json` prints clean JSON
+  to stdout, but adding `--dry-run` prints the boxed human table instead. So a scripted
+  "dry-run first, then execute" pre-flight has to regex the line `Dry run completed, execution
+  status: success` out of free text. Machine-readable dry-run output would remove the only fragile
+  parse in our settlement path.
+- **A coin's own package may have no mint function, but the TreasuryCap holder can always mint through
+  the framework.** Our `usdsui` module exposes only `init`, per GraphQL `asMovePackage { module(name:
+  "usdsui") { functions } }`. `0x2::coin::mint<T>(&mut TreasuryCap<T>, u64, &mut TxContext):
+  Coin<T>` (also read over GraphQL from testnet's `0x2`) minted 20,000 USDSUI and fed it straight into
+  `fund_vault` in one PTB. The GraphQL `function { visibility isEntry parameters { repr } return { repr
+  } }` query is a clean, exact way to verify a signature before calling it. It's much better than
+  `sui client object <pkg>`, which dumps bytecode one byte per row.
+- **Nice: `SuiGrpcClient.simulateTransaction({ include: { commandResults: true } })` is a working
+  dev-inspect.** Reading `bonded_registry::current_policy_hash` needed no gas coin and no funded
+  sender: the SDK simulates with a mocked gas coin when none is set, as its own type docs say.
+  `returnValues[0].bcs` decoded directly with `bcs.byteVector()`. The SDK's type docs also warn
+  that event/object `json` shapes differ between JSON-RPC, gRPC and GraphQL, and recommend decoding
+  `bcs` instead. We BCS-decode the `Settled` event and the payout `Coin<T>` (`{ id, balance: u64 }`)
+  rather than trusting `json` field names. That also sidesteps the float-for-`u8`/string-for-`u64`
+  inconsistency noted on 2026-09-25.
+- **An `address` argument shorter than 32 bytes is silently zero-left-padded, by the CLI (`@0xaa…aa`,
+  20 bytes) and by `normalizeSuiAddress`.** Our demo agent id is a 20-byte EVM-shaped string, so its
+  registry key on-chain is `0x000000000000000000000000aaaa…aa`. It's consistent at both ends (commit
+  and read both pad), so nothing broke. But nothing warns you that a 20-byte EVM address and its
+  zero-padded 32-byte form are the same Sui key. A cross-chain project could be confused by that, or
+  could collide two ids that way.
+- **Consumer-side, our own bug, recorded because it only surfaced with `@mysten/sui`:** our copied Jest
+  `moduleNameMapper` of `'^(\.{1,2}/.*)\.js$'` in a plain JS string collapses `\.` to `.`, so it also
+  rewrote the SDK's internal `./type-tag-serializer.mjs` imports and failed with "Could not locate
+  module". `@mysten/sui` 2.x ships ESM-only `.mjs` internals, so any monorepo with that
+  (common) mapper will hit this the first time it imports the SDK under Jest.
+- **Live confirmation:** mint+fund `3bFBZibHQoW2fyZ2L7PqCsusxMo6HUt2cRBvSfEDK2s4`; `commit_policy`
+  `6p3uSWubGhPf84fKYLTcDwcTpEzBmuc2NELoUab1HLE1`; acme `mint_verdict`+`settle` for 1,250,000,000
+  base units `A4xfzgQW6YJatYtQuaNX43xgJ5tzXKVTY5s6f72TxoJL`. The recipient's new coin holds exactly
+  1,250,000,000 and the fullnode's `balanceChanges` agree. Total gas for all three: 6,327,280 MIST.
