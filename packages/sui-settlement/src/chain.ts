@@ -210,3 +210,33 @@ export async function readPolicyHash(agentAddress: string, config: SettlementCon
   const bytes = bcs.byteVector().parse(await simulateRegistryCall(config, 'current_policy_hash', agent));
   return `0x${Buffer.from(bytes).toString('hex')}` as Hash32;
 }
+
+/**
+ * Reads `Vault<T>.spent_this_period` from chain, through a simulated (never
+ * executed, never signed) call to the Move getter
+ * `bonded_vault::spent_this_period<T>(vault: &Vault<T>): u64`.
+ *
+ * What the number is, stated plainly (read from bonded_vault.move, not
+ * assumed): a vault-wide running total of every `settle`/`settle_with_stepup`
+ * payout. It is not per agent, and nothing in the Move module ever resets
+ * it, so "this period" is in practice "since the vault was created".
+ */
+export async function readVaultSpentThisPeriod(config: SettlementConfig): Promise<bigint> {
+  const client = grpcClient(config);
+  const tx = new Transaction();
+  tx.setSender(normalizeSuiAddress(config.vaultId));
+  tx.moveCall({
+    target: `${config.packageId}::bonded_vault::spent_this_period`,
+    typeArguments: [config.coinType],
+    arguments: [tx.object(config.vaultId)],
+  });
+  const sim = await client.simulateTransaction({ transaction: tx, include: { commandResults: true } });
+  if (sim.$kind !== 'Transaction') {
+    throw new SettlementConfirmationError(`simulate spent_this_period failed: ${JSON.stringify(sim.FailedTransaction.status.error)}`);
+  }
+  const out = sim.commandResults?.[0]?.returnValues?.[0]?.bcs;
+  if (out === undefined) {
+    throw new SettlementConfirmationError('simulate spent_this_period returned no return value.');
+  }
+  return BigInt(bcs.u64().parse(out));
+}

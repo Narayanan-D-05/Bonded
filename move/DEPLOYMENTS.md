@@ -166,3 +166,27 @@ exist yet. Minting one without a real verification would fake the human step. Th
 covered by unit tests only: it refuses hand-built, uncertified, denied, stale, and wrong-proposal
 approvals before any config load or CLI call. The live `settle_with_stepup` run waits on World
 credentials. The vault holds 18,754 USDSUI, enough for the $8,450 globex invoice when that happens.
+
+### Console closes the loop: one AP-agent policy, verdict → payout from `POST /api/enforce`
+
+2026-09-26. Same package, vault, registry and EnforcerCap. Signer `0x916c…f05a`, testnet only.
+
+The console now enforces every invoice against ONE policy for the AP agent (`apps/console/lib/ap-policy.ts`),
+committed once to `BondedRegistry` and read back on-chain (`readPolicyHash`) on every `enforce()` call.
+This commit **replaces** the acme-only demo policy hash recorded above for the same agent key
+(`commit_policy` only ever overwrites forward). Running `packages/sui-settlement`'s `live:testnet` script
+again would re-commit the old acme-only hash and make every console invoice fail `STALE_POLICY`.
+
+| Step | Digest | Result | Gas (MIST) |
+|---|---|---|---|
+| `commit_policy(0xaaaa…aa, 0xd6c86539…a854)` (`pnpm --filter @bonded/console commit:policy`) | `8AVk9pGcPovuftPwsHqkiQUCxcTHp2uxZFnQw8LxzVh` ([explorer](https://suiscan.xyz/testnet/tx/8AVk9pGcPovuftPwsHqkiQUCxcTHp2uxZFnQw8LxzVh)) | Registry for `0x0000…aaaa` moved `0xf372ffa8…0eea` → `0xd6c865398212f73c6129e2a3c59e502f9fc45cd5f8781ea6da339775eee3a854`. The script's own gRPC read-back failed with a transient `RpcError: fetch failed`; the hash was then read back separately with `readPolicyHash` and matched. The digest was recovered from the gas coin's `prevTx` and checked with `sui client tx-block` (status success) | 1,000,000 + 5,920,400 − 5,861,196 = **1,059,204** |
+| `coin::mint<USDSUI>` 10,000 USDSUI (10,000,000,000) + `fund_vault`, one PTB, same TreasuryCap method as above, dry-run first | `7rUoMpbDH5CgMbPDPGHu6xQXpqKUo8rKFSeLRR77vtTC` ([explorer](https://suiscan.xyz/testnet/tx/7rUoMpbDH5CgMbPDPGHu6xQXpqKUo8rKFSeLRR77vtTC)) | Vault 18,754,000,000 → **28,754,000,000**, enough for acme + the $8,450 globex bank change + the $15,000 halcyon invoice. (A first attempt timed out client-side before submission; the vault and gas balance were re-read and were unchanged before retrying.) | 1,000,000 + 4,529,600 − 4,484,304 = **1,045,296** |
+| `POST /api/enforce {"invoiceId":"inv-acme-supplies"}` against `next dev` → real `enforce()` (on-chain policy hash, on-chain `spent_this_period` 1,251,000,000 as `sumRecentSpend`) → CLEARED / OK → `settleCleared` | `BkuSQ6nhyEXBXvGs9X3kiX3WVgTkPZ9HAkEdNgDqwP69` ([explorer](https://suiscan.xyz/testnet/tx/BkuSQ6nhyEXBXvGs9X3kiX3WVgTkPZ9HAkEdNgDqwP69)) | Proposal `0xe4d9963e6b096851c10a9ca4947a7f8389cc67247c4fc589e76e5873083dd306` (new id, not the `0x3333…33` paid above). 1,250,000,000 to acme's vendor-master address `0x4d5a…d3e0`, confirmed by `@bonded/sui-settlement`'s read-back. A second identical POST returned the same recorded digest with `alreadySettled: true` and submitted nothing (settle-once ledger, `.data/console/settlements.json`); that second enforce read `spent_this_period` = 2,501,000,000 from chain | 1,000,000 + 5,517,600 − 4,123,152 = **2,394,448** |
+
+**Total SUI spent by this section: 4,498,948 MIST (0.0045 SUI)**, against a 0.2 SUI cap. Sender SUI:
+928,647,788 → 924,148,840 MIST.
+
+Not run live: the globex bank-change and halcyon ($15,000, `settle_with_stepup`) scenarios. Both need
+`INTERCEPTA_API_KEY` (their screen fails closed without it: REFUSED / PREMISE_UNRESOLVABLE, observed in
+the same dev-server run) and World sandbox credentials (`/api/stepup` answered 501 naming the three
+missing vars).

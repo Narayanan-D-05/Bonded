@@ -8,9 +8,16 @@
  *    credentials throw `XeroConfigError` naming the missing vars, right here
  *    at construction time. There is never a fallback to the fixture.
  *  - anything else -> throws. A typo must not silently select the fixture.
+ *
+ * `options.changeLogPath` (fixture mode only): overlay the append-only
+ * vendor-master change log (`../vendor-master-changes.ts`) on the fixture.
+ * Without it, the fixture source is exactly `fetchVendorTruth`, unchanged.
+ * In xero mode the change log is audit-only and never overlaid: Xero itself
+ * holds the updated bank details.
  */
 
 import { fetchVendorTruth, type VendorTruth } from '../vendor-fixture.js';
+import { createFixtureVendorSourceWithChanges } from '../vendor-master-changes.js';
 import { XeroClient, XeroConfigError, createXeroVendorSource, readXeroCredentials } from './xero.js';
 
 export type VendorSource = (vendorId: string) => Promise<VendorTruth | null>;
@@ -26,7 +33,13 @@ export function vendorSourceKind(env: NodeJS.ProcessEnv = process.env): VendorSo
   throw new XeroConfigError(`${VENDOR_MASTER_SOURCE_ENV}=${JSON.stringify(value)} is not one of: fixture, xero`);
 }
 
-export function createVendorSource(env: NodeJS.ProcessEnv = process.env): VendorSource {
-  if (vendorSourceKind(env) === 'fixture') return fetchVendorTruth;
+export interface VendorSourceOptions {
+  changeLogPath?: string;
+}
+
+export function createVendorSource(env: NodeJS.ProcessEnv = process.env, options: VendorSourceOptions = {}): VendorSource {
+  if (vendorSourceKind(env) === 'fixture') {
+    return options.changeLogPath === undefined ? fetchVendorTruth : createFixtureVendorSourceWithChanges(options.changeLogPath);
+  }
   return createXeroVendorSource(new XeroClient(readXeroCredentials(env)));
 }

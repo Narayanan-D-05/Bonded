@@ -19,7 +19,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { Hash32, PolicyArtifact, Premise } from '@bonded/seam';
+import type { Hash32, PolicyArtifact, Premise, Proposal } from '@bonded/seam';
 import type { EnforceDeps, LogRefInput } from '@bonded/enforcer';
 
 /**
@@ -68,6 +68,50 @@ export function createResolvePremise(registry: SchemaRegistry): EnforceDeps['res
       return null;
     }
     return fieldFn(...(def.args ?? []));
+  };
+}
+
+/** Prefix of a premise arg that names another premise's CLAIMED value: `claim:<premiseId>`. */
+export const CLAIM_ARG_PREFIX = 'claim:';
+
+/**
+ * Binds `claim:<premiseId>` args to one proposal's claimed values, so a
+ * committed policy can say "screen whatever payee identity this proposal
+ * claims" without the policy (and its on-chain hash) changing per invoice.
+ *
+ * Why this exists: `BondedRegistry` holds ONE policy hash per agent, so one
+ * policy has to serve every invoice that agent pays. A screening premise's
+ * subject (e.g. the claimed payee EVM identity) differs per invoice, and
+ * `Premise.args` are fixed in the policy. A plain arg passes through
+ * unchanged; `claim:<id>` is replaced by `proposal.premises[i].claimedValue`
+ * for that premise id.
+ *
+ * Fails closed: if the proposal makes no claim for the named premise (or
+ * claims it more than once), this resolves `null` without calling the
+ * adapter, which `enforce()` turns into REFUSED / PREMISE_UNRESOLVABLE.
+ *
+ * Opt-in: `createResolvePremise` itself never interprets args.
+ */
+export function bindClaimArgs(
+  resolvePremise: EnforceDeps['resolvePremise'],
+  proposal: Pick<Proposal, 'premises'>,
+): EnforceDeps['resolvePremise'] {
+  return async (def: Premise, at: bigint): Promise<bigint | string | null> => {
+    if (def.args === undefined || !def.args.some((a) => a.startsWith(CLAIM_ARG_PREFIX))) {
+      return resolvePremise(def, at);
+    }
+    const bound: string[] = [];
+    for (const arg of def.args) {
+      if (!arg.startsWith(CLAIM_ARG_PREFIX)) {
+        bound.push(arg);
+        continue;
+      }
+      const premiseId = arg.slice(CLAIM_ARG_PREFIX.length);
+      const claims = proposal.premises.filter((p) => p.premiseId === premiseId);
+      if (claims.length !== 1) return null;
+      bound.push(claims[0]!.claimedValue);
+    }
+    return resolvePremise({ ...def, args: bound }, at);
   };
 }
 

@@ -2,7 +2,7 @@
   "name": "@bonded/console",
   "version": "0.1.0",
   "private": true,
-  "description": "Invoice Inbox demo UI (plan build-order item 7): a minimal Next.js app wiring the real enforce() decision loop, composed once in lib/enforce-deps.ts via @bonded/dispatcher's createEnforceDeps, against the same three real, no-mock BEC/vendor-invoice-fraud scenarios packages/villain-corpus already proved. Includes a thin UI wrapper over @bonded/world-agents' World ID step-up flow for the HELD_FOR_STEPUP case. No browser-side chain signing anywhere (CLAUDE.md rule 3) — settlement stays a CLI/script demo.",
+  "description": "Invoice Inbox demo UI (plan build-order item 7): a minimal Next.js app wiring the real enforce() decision loop, composed once in lib/enforce-deps.ts via @bonded/dispatcher's createEnforceDeps, against the same three real, no-mock BEC/vendor-invoice-fraud scenarios packages/villain-corpus already proved. Includes a thin UI wrapper over @bonded/world-agents' World ID step-up flow for the HELD_FOR_STEPUP case. No browser-side chain signing anywhere (CLAUDE.md rule 3): CLEARED and World-approved verdicts settle server-side through @bonded/sui-settlement (Sui CLI keystore), once per proposal.",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf .next dist-test",
-    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs"
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs",
+    "commit:policy": "tsx scripts/commit-ap-policy.ts"
   },
   "dependencies": {
     "@bonded/dispatcher": "workspace:*",
@@ -18,13 +19,14 @@
     "@bonded/intercepta-adapter": "workspace:*",
     "@bonded/issuer-oracle": "workspace:*",
     "@bonded/seam": "workspace:*",
+    "@bonded/sui-settlement": "workspace:*",
     "@bonded/world-agents": "workspace:*",
-    "next": "^16.3.6",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
     "framer-motion": "^13.4.4",
     "mermaid": "^12.0.0",
-    "ogl": "^1.0.11"
+    "next": "^16.3.6",
+    "ogl": "^1.0.11",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
@@ -37,6 +39,7 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
     "ts-jest": "^29.1.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   }
 }

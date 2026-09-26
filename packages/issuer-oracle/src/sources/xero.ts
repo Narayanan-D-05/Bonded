@@ -591,6 +591,50 @@ export class XeroClient {
 }
 
 /**
+ * Scopes for a World-approved bank-detail change: write contacts, read bills
+ * (the read-back goes through `createXeroVendorSource`). Writing
+ * `BankAccountDetails` also needs the BankAccountAdmin permission on the
+ * authorising user (Contacts docs, cited in the header).
+ */
+export const XERO_BANK_CHANGE_SCOPES = ['accounting.contacts', 'accounting.invoices.read'] as const;
+
+/**
+ * Writes a new Sui payout address into a supplier's `BankAccountDetails`,
+ * keeping its registered EVM identity, in the same `bonded:v1;sui=…;evm=…`
+ * format and through the same `POST /Contacts` update path
+ * `scripts/xero-setup.ts` uses.
+ *
+ * Compare-and-set: the contact's current payout address must equal
+ * `expectedPreviousPayoutAddress`, or this throws before writing. After the
+ * write, the returned contact's `BankAccountDetails` must parse back to the
+ * new address, or this throws.
+ */
+export async function updateXeroPayoutAddress(
+  client: XeroClient,
+  input: { vendorId: string; expectedPreviousPayoutAddress: string; newPayoutAddress: string },
+): Promise<{ contactId: string; bankAccountDetails: string }> {
+  const contact = selectContactByNumber(await client.findContactsByNumber(input.vendorId), input.vendorId);
+  if (contact === null) throw new XeroDataError(`No Xero contact has ContactNumber "${input.vendorId}"`);
+  if (typeof contact.ContactID !== 'string') throw new XeroDataError(`Xero contact "${input.vendorId}" has no ContactID`);
+  const current = parsePayoutDetails(contact.BankAccountDetails);
+  if (current.payoutAddress !== input.expectedPreviousPayoutAddress.toLowerCase()) {
+    throw new XeroDataError(
+      `Xero contact "${input.vendorId}" pays ${current.payoutAddress}, not ${input.expectedPreviousPayoutAddress}; ` +
+        'it changed since this approval was requested. Refusing to overwrite it.',
+    );
+  }
+  const bankAccountDetails = encodePayoutDetails(input.newPayoutAddress.toLowerCase(), current.evmAddress);
+  const updated = contactsFromResponse(
+    await client.request('POST', '/Contacts', {}, { Contacts: [{ ContactID: contact.ContactID, BankAccountDetails: bankAccountDetails }] }),
+  );
+  const echoed = parsePayoutDetails(updated[0]?.BankAccountDetails);
+  if (echoed.payoutAddress !== input.newPayoutAddress.toLowerCase() || echoed.evmAddress !== current.evmAddress) {
+    throw new XeroDataError(`Xero accepted the update for "${input.vendorId}" but echoed different BankAccountDetails; check the contact in Xero.`);
+  }
+  return { contactId: contact.ContactID, bankAccountDetails };
+}
+
+/**
  * The Xero-backed `fetchVendorTruth`: same signature as the fixture's.
  * Two sequential API calls per lookup (contact, then bills), well inside the
  * documented 5-concurrent / 60-per-minute per-tenant limits for a demo.

@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
-import { DEMO_VENDOR_IDS, isDemoVendorId, runEnforceForInvoice, toApiResponse } from '../../../lib/enforce-deps';
+import { DEMO_INVOICE_IDS, isDemoInvoiceId, OnchainPolicyError } from '../../../lib/enforce-deps';
+import { proposePayment } from '../../../lib/payment';
 
 /**
- * `POST /api/enforce` — takes `{ invoiceId }`, builds the matching real `Proposal`/
- * `PolicyArtifact` (`lib/enforce-deps.ts`), calls the real `enforce()` from `@bonded/enforcer`,
- * and returns the `Verdict` JSON plus the claimed/derived pair for EVERY premise checked, not
- * just the mismatched one (CLAUDE.md rule 5 — the actual re-derived value must be visible,
- * never a bare claim; showing every premise keeps the diff table honest for the clean-clearing
- * case too).
+ * `POST /api/enforce { invoiceId }`: the AP agent proposing payment of one invoice. Runs the real
+ * `enforce()` against the agent's ONE policy, whose hash is read from BondedRegistry on-chain, and
+ * returns the verdict plus the claimed/derived pair for every premise checked (CLAUDE.md rule 5).
+ * On CLEARED it settles on Sui through `settleCleared`, once per proposal: a repeat POST returns
+ * the recorded digest instead of paying again. There is no human button in this path.
  */
 export async function POST(request: Request): Promise<Response> {
   let body: unknown;
@@ -18,13 +18,21 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const invoiceId = (body as { invoiceId?: unknown } | null)?.invoiceId;
-  if (typeof invoiceId !== 'string' || !isDemoVendorId(invoiceId)) {
+  if (typeof invoiceId !== 'string' || !isDemoInvoiceId(invoiceId)) {
     return NextResponse.json(
-      { error: `invoiceId must be one of: ${DEMO_VENDOR_IDS.join(', ')}`, received: invoiceId ?? null },
+      { error: `invoiceId must be one of: ${DEMO_INVOICE_IDS.join(', ')}`, received: invoiceId ?? null },
       { status: 400 },
     );
   }
 
-  const result = await runEnforceForInvoice(invoiceId);
-  return NextResponse.json(toApiResponse(result));
+  try {
+    return NextResponse.json(await proposePayment(invoiceId));
+  } catch (error) {
+    // Visible failure, never a fallback (e.g. the on-chain policy hash or vault read failed).
+    const status = error instanceof OnchainPolicyError ? 503 : 500;
+    return NextResponse.json(
+      { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) },
+      { status },
+    );
+  }
 }
