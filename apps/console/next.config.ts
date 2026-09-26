@@ -17,6 +17,11 @@ if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
  */
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // The World sandbox only accepts an HTTPS redirect URI, so the console is reached in
+  // development through an ngrok tunnel. Next.js blocks dev assets requested from any
+  // hostname other than localhost unless it is listed here (see the bundled
+  // docs: 05-config/01-next-config-js/allowedDevOrigins.md). Hostnames only, no scheme/port.
+  allowedDevOrigins: ['*.ngrok-free.dev', '*.ngrok-free.app'],
 };
 
 export default nextConfig;
