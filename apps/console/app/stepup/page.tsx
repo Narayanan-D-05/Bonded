@@ -9,6 +9,11 @@ import {
   type VendorRequestGateResult,
 } from '../../lib/vendor-bank-change';
 import { StepUpActions } from './StepUpActions';
+import { SuiscanLink } from '../../components/ui/ExternalLink';
+import { formatUtc } from '../../components/ui/format';
+import { Notice } from '../../components/ui/Notice';
+import { Field, Panel } from '../../components/ui/Panel';
+import { PageHeader } from '../../components/ui/PageHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,85 +75,134 @@ export default async function StepUpPage({ searchParams }: Props) {
     : [];
   const vendor = proposal ? await vendorSide(proposal) : null;
 
+  const invoiceId = proposal ? findInvoiceIdByProposalHash(proposal) : null;
+
   return (
-    <div>
-      <Link href="/invoices" className="text-sm text-blue-600 hover:underline">
-        ← Invoice Inbox
-      </Link>
-      <h1 className="mt-2 mb-4 text-2xl font-bold">World ID Step-Up</h1>
+    <div className="space-y-6">
+      <PageHeader
+        kicker="Form AP-3 · Human step-up"
+        title="World ID step-up"
+        back={{ href: invoiceId ? `/invoices/${invoiceId}` : '/invoices', label: invoiceId ? `Back to ${invoiceId}` : 'Invoice Inbox' }}
+        lede="The one human moment in the payment flow. A held proposal is released only when a live person approves this exact proposal with a fresh World ID check; the approval is then re-checked against the records before anything moves."
+      />
 
       {!proposal && (
-        <p className="text-slate-600">
-          No proposal specified. Go back to the <Link href="/invoices" className="text-blue-600 hover:underline">Invoice Inbox</Link>{' '}
+        <Notice tone="info" title="No proposal specified">
+          Go back to the{' '}
+          <Link href="/invoices" className="underline underline-offset-2 hover:text-manifest">
+            Invoice Inbox
+          </Link>{' '}
           and open a held invoice.
-        </p>
+        </Notice>
+      )}
+
+      {proposal && (
+        <Panel label="Held proposal" aside={invoiceId ?? 'not a demo invoice'}>
+          <dl>
+            <Field label="proposalHash">{proposal}</Field>
+          </dl>
+        </Panel>
       )}
 
       {vendor && 'error' in vendor && (
-        <div className="mb-4 rounded bg-red-50 px-4 py-3 text-sm text-red-800">Vendor-side request store: {vendor.error}</div>
+        <Notice tone="error" role="alert" title="Vendor-side request store could not be read">
+          <span className="font-mono text-xs">{vendor.error}</span>
+        </Notice>
       )}
       {vendor && 'gate' in vendor && (
-        <div className={`mb-4 rounded px-4 py-3 text-sm ${vendor.gate.ok ? 'bg-green-50 text-green-900' : 'bg-amber-50 text-amber-900'}`}>
-          <div className="font-semibold">Vendor side (World ID via IDKit)</div>
+        <Panel
+          label="Vendor side · World ID via IDKit"
+          aside={
+            vendor.gate.ok ? (
+              <span className="font-semibold text-seal">Verified request on file</span>
+            ) : (
+              <span className="font-semibold text-hold">No matching request</span>
+            )
+          }
+        >
           {vendor.gate.ok ? (
-            <div>
-              {vendor.vendorId} filed this exact change (payout <span className="font-mono text-xs">{vendor.payout}</span>, EVM identity{' '}
-              <span className="font-mono text-xs">{vendor.evm}</span>) and verified it with the {vendor.gate.request.credentialType} credential
-              (World ID {vendor.gate.request.protocolVersion}, {vendor.gate.request.environment}) at{' '}
-              {new Date(vendor.gate.request.verifiedAtMs).toISOString()}. Verified person&apos;s nullifier for this action:{' '}
-              <span className="font-mono text-xs">{vendor.gate.request.nullifier}</span>.
-            </div>
+            <>
+              <p className="mb-2 text-sm text-fog">
+                {vendor.vendorId} filed this exact change and verified it with the {vendor.gate.request.credentialType} credential (World ID{' '}
+                {vendor.gate.request.protocolVersion}, {vendor.gate.request.environment}).
+              </p>
+              <dl>
+                <Field label="Vendor" mono={false}>
+                  {vendor.vendorId}
+                </Field>
+                <Field label="New payout">{vendor.payout}</Field>
+                <Field label="EVM identity">{vendor.evm}</Field>
+                <Field label="Verified at">{new Date(vendor.gate.request.verifiedAtMs).toISOString()}</Field>
+                <Field label="Nullifier">
+                  {vendor.gate.request.nullifier}
+                  <span className="mt-0.5 block font-sans text-xs text-fog">The verified person’s pseudonym for this action.</span>
+                </Field>
+              </dl>
+            </>
           ) : (
-            <div>
-              {vendor.gate.detail} Until then, approving here is denied <span className="font-mono">no_verified_vendor_request</span>.{' '}
-              <Link href="/vendor/bank-change" className="text-blue-700 hover:underline">
-                Vendor portal →
+            <div className="space-y-3 text-sm">
+              <p className="text-manifest/90">
+                {vendor.gate.detail} Until then, approving here is denied <span className="font-mono text-hold">no_verified_vendor_request</span>.
+              </p>
+              <Link href="/vendor/bank-change" className="inline-block text-sm text-manifest underline underline-offset-2 hover:text-white">
+                Vendor portal <span aria-hidden="true">→</span>
               </Link>
             </div>
           )}
-        </div>
+        </Panel>
       )}
 
       {proposal && !sp.decision && !settled && <StepUpActions proposalHash={proposal} />}
 
       {sp.decision === 'approved' && (
-        <div className="rounded bg-green-100 px-4 py-3 text-sm text-green-800">Approved by World ID. sub={sp.sub ?? '(unknown)'}</div>
+        <Notice tone="ok" role="status" title="Approved by World ID">
+          <span className="font-mono text-xs">sub={sp.sub ?? '(unknown)'}</span>
+        </Notice>
       )}
       {(sp.decision === 'denied' || sp.decision === 'error') && (
-        <div className="rounded bg-red-100 px-4 py-3 text-sm text-red-800">
-          {sp.decision === 'error' ? 'Error' : 'Denied'}: <span className="font-mono">{sp.reason ?? '(no reason given)'}</span>
+        <Notice tone="error" role="alert" title={sp.decision === 'error' ? 'Error' : 'Denied'}>
+          <span className="font-mono text-sm">{sp.reason ?? '(no reason given)'}</span>
           {sp.detail && <div className="mt-1">{sp.detail}</div>}
           {/* Read from the records, not assumed: the ledger and the vendor-master change log. */}
           {!settled && changes.length === 0 && (
-            <div className="mt-1 font-semibold">
+            <div className="mt-2 font-semibold text-manifest">
               Protected action did not occur: no payment was made and the vendor record was not changed.
             </div>
           )}
-        </div>
+        </Notice>
       )}
 
       {changes.map((c) => (
-        <div key={c.recordedAtMs} className="mt-4 rounded bg-slate-100 px-4 py-3 text-sm">
-          Vendor master updated ({c.appliedTo}): {c.vendorId} payout{' '}
-          <span className="font-mono text-xs">{c.previousPayoutAddress}</span> →{' '}
-          <span className="font-mono text-xs">{c.newPayoutAddress}</span>, confirmed by World sub {c.approvedBy.worldSub}.
-        </div>
+        <Panel key={c.recordedAtMs} label={`Vendor master updated (${c.appliedTo})`} aside={formatUtc(c.recordedAtMs)}>
+          <dl>
+            <Field label="Vendor" mono={false}>
+              {c.vendorId}
+            </Field>
+            <Field label="Previous payout">{c.previousPayoutAddress}</Field>
+            <Field label="New payout">{c.newPayoutAddress}</Field>
+            <Field label="Confirmed by">
+              World sub {c.approvedBy.worldSub}
+            </Field>
+          </dl>
+        </Panel>
       ))}
 
       {settled?.status === 'settled' && (
-        <div className="mt-4 rounded bg-green-50 px-4 py-3 text-sm text-green-900">
-          Settled on Sui testnet{settled.viaStepup ? ' (settle_with_stepup)' : ''}: digest{' '}
-          <a href={settled.explorerUrl} className="font-mono text-blue-700 hover:underline">
-            {settled.digest}
-          </a>{' '}
-          to <span className="font-mono text-xs">{settled.recipient}</span>.
-        </div>
+        <Panel label="Settlement on Sui" aside={<span className="font-semibold text-seal">Settled</span>}>
+          <p className="mb-2 text-sm text-fog">Settled on Sui testnet{settled.viaStepup ? ' (settle_with_stepup)' : ''}.</p>
+          <dl>
+            <Field label="Digest">
+              <SuiscanLink explorerUrl={settled.explorerUrl} digest={settled.digest} full className="text-manifest" />
+            </Field>
+            <Field label="Recipient">{settled.recipient}</Field>
+            <Field label="Settled at">{formatUtc(settled.settledAtMs)}</Field>
+          </dl>
+        </Panel>
       )}
       {settled && settled.status !== 'settled' && (
-        <div className="mt-4 rounded bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Settlement {settled.status}
-          {settled.status === 'unknown' ? `: ${settled.error}` : ''}
-        </div>
+        <Notice tone="hold" role="status" title={`Settlement ${settled.status}`}>
+          {settled.status === 'unknown' ? <span className="font-mono text-xs">{settled.error}</span> : null}
+        </Notice>
       )}
     </div>
   );

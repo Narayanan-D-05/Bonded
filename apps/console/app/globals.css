@@ -2,12 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Mirrors the palette in tailwind.config.ts (see the contrast notes there). */
 :root {
-  --background: #ffffff;
-  --foreground: #0f172a;
+  --harbor: #0b1a22;
+  --deepwater: #122733;
+  --hairline: #1e3a47;
+  --manifest: #eceeea;
+  --ink: #0e1614;
+  --fog: #93a7ae;
+  color-scheme: dark;
+}
+
+html {
+  background-color: var(--harbor);
+  /* Nothing on the page may widen it past the viewport; long hashes wrap or truncate. */
+  overflow-x: clip;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background-color: var(--harbor);
+  color: var(--manifest);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every hash, amount and address is mono with tabular figures, no exceptions. */
+.font-mono,
+code,
+kbd,
+samp {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--manifest);
+  outline-offset: 2px;
+}
+
+/* ── Manifest paper: the document surface laid on the harbor canvas ───────── */
+.paper {
+  background-color: var(--manifest);
+  color: var(--ink);
+  border-radius: 3px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 18px 40px -24px rgba(0, 0, 0, 0.7);
+}
+
+/* Faint ruled lines, like a printed customs form. Decorative, below text. */
+.paper-ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 31px,
+    rgba(14, 22, 20, 0.06) 31px,
+    rgba(14, 22, 20, 0.06) 32px
+  );
+}
+
+/* ── The one signature motion: the inspection-stamp press ────────────────────
+   Runs once, when a verdict lands. ~180ms with an overshoot curve: the stamp
+   comes down large and tilted, and settles pressed into the paper. Nothing
+   else on the site moves beyond plain colour transitions.
+────────────────────────────────────────────────────────────────────────── */
+@keyframes stamp-press {
+  0% {
+    opacity: 0;
+    transform: scale(1.6) rotate(-9deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-4deg);
+  }
+}
+
+.stamp {
+  transform: rotate(-4deg);
+  transform-origin: center;
+}
+
+.stamp-press {
+  animation: stamp-press 180ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-press {
+    animation: none;
+    opacity: 1;
+    transform: rotate(-4deg);
+  }
+  * {
+    transition-duration: 0ms !important;
+  }
+}
+
+/* A dashed perforation rule, used between a document's header and body. */
+.perforation {
+  border-top: 1px dashed rgba(14, 22, 20, 0.28);
 }

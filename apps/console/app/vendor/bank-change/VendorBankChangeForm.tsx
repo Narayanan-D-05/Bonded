@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { IDKitRequestWidget, passport, type IDKitErrorCodes, type IDKitResult, type RpContext } from '@worldcoin/idkit';
+import { buttonClass } from '../../../components/ui/button';
+import { Notice } from '../../../components/ui/Notice';
 
 /**
  * The vendor's side of a bank change: pick the vendor, enter the new Sui payout address and EVM
@@ -138,13 +140,16 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
 
   const locked = session !== null;
 
+  const inputClass =
+    'mt-1.5 block w-full min-w-0 rounded-control border border-hairline bg-harbor px-3 py-2 font-mono text-xs text-manifest focus:border-fog focus:outline-none disabled:opacity-60';
+
   return (
     <div>
-      <div className="space-y-4">
+      <div className="space-y-5">
         <label className="block text-sm">
-          <span className="font-medium">Vendor</span>
+          <span className="font-medium text-manifest">Vendor</span>
           <select
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1"
+            className="mt-1.5 block w-full min-w-0 rounded-control border border-hairline bg-harbor px-3 py-2 text-sm text-manifest focus:border-fog focus:outline-none disabled:opacity-60"
             value={vendorId}
             disabled={locked}
             onChange={(e) => setVendorId(e.target.value)}
@@ -157,57 +162,50 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
           </select>
         </label>
         {selected && (
-          <p className="text-xs text-slate-500">
-            On file: payout <span className="font-mono">{selected.payoutAddress}</span>, registered EVM identity{' '}
-            <span className="font-mono">{selected.evmAddress}</span>
-          </p>
+          <dl className="grid gap-x-4 gap-y-1 rounded-doc border border-hairline bg-harbor/60 px-3 py-2 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <dt className="text-fog">On file: payout</dt>
+            <dd className="break-all font-mono text-manifest">{selected.payoutAddress}</dd>
+            <dt className="text-fog">Registered EVM identity</dt>
+            <dd className="break-all font-mono text-manifest">{selected.evmAddress}</dd>
+          </dl>
         )}
         <label className="block text-sm">
-          <span className="font-medium">New Sui payout address</span>
-          <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs"
-            value={newPayoutAddress}
-            disabled={locked}
-            onChange={(e) => setNewPayoutAddress(e.target.value)}
-          />
+          <span className="font-medium text-manifest">New Sui payout address</span>
+          <input className={inputClass} value={newPayoutAddress} disabled={locked} spellCheck={false} onChange={(e) => setNewPayoutAddress(e.target.value)} />
         </label>
         <label className="block text-sm">
-          <span className="font-medium">New EVM identity</span>
-          <input
-            className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs"
-            value={newEvmAddress}
-            disabled={locked}
-            onChange={(e) => setNewEvmAddress(e.target.value)}
-          />
+          <span className="font-medium text-manifest">New EVM identity</span>
+          <input className={inputClass} value={newEvmAddress} disabled={locked} spellCheck={false} onChange={(e) => setNewEvmAddress(e.target.value)} />
         </label>
       </div>
 
-      <div className="mt-6 flex gap-3">
+      <div className="mt-6 flex flex-wrap gap-3">
         {!locked && (
-          <button
-            onClick={start}
-            disabled={loading}
-            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <button onClick={start} disabled={loading} className={buttonClass('primary')}>
             {loading ? 'Signing request…' : 'Verify with World ID (passport) and submit'}
           </button>
         )}
         {locked && outcome.kind !== 'recorded' && (
-          <button onClick={() => setOpen(true)} className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          <button onClick={() => setOpen(true)} className={buttonClass('primary')}>
             Reopen World ID
           </button>
         )}
         {locked && (
-          <button onClick={reset} className="rounded border border-slate-300 px-4 py-2 text-sm">
+          <button onClick={reset} className={buttonClass('secondary')}>
             Start over
           </button>
         )}
       </div>
 
       {session && (
-        <p className="mt-3 text-xs text-slate-500">
-          Signal bound into the proof: <span className="font-mono">{session.signal}</span> · action {session.action} · environment {session.environment}
-        </p>
+        <dl className="mt-4 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">
+          <dt className="text-fog">Signal bound into the proof</dt>
+          <dd className="break-all font-mono text-manifest">{session.signal}</dd>
+          <dt className="text-fog">Action · environment</dt>
+          <dd className="break-all font-mono text-manifest">
+            {session.action} · {session.environment}
+          </dd>
+        </dl>
       )}
 
       {session && (
@@ -239,36 +237,33 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
           }}
         />
       )}
-
       {outcome.kind === 'error' && (
-        <div className="mt-4 rounded bg-red-50 px-4 py-3 text-sm text-red-800">
-          <div className="font-semibold">{outcome.title}</div>
+        <Notice tone="error" role="alert" title={outcome.title} className="mt-5">
           <div>{outcome.detail}</div>
           {outcome.missingEnv && outcome.missingEnv.length > 0 && (
             <div className="mt-1">
               Env: <span className="font-mono">{outcome.missingEnv.join(', ')}</span>
             </div>
           )}
-        </div>
+        </Notice>
       )}
 
       {outcome.kind === 'recorded' && (
-        <div className="mt-4 rounded bg-green-50 px-4 py-3 text-sm text-green-900">
-          <div className="font-semibold">Verified by World and recorded.</div>
+        <Notice tone="ok" role="status" title="Verified by World and recorded." className="mt-5">
           <div>
-            {outcome.record.vendorId}: payout <span className="font-mono text-xs">{outcome.record.newPayoutAddress}</span>, EVM identity{' '}
-            <span className="font-mono text-xs">{outcome.record.newEvmAddress}</span>
-          </div>
-          <div className="text-xs">
-            Credential: {outcome.record.credentialType} (World ID {outcome.record.protocolVersion}
-            {outcome.record.issuerSchemaId !== null ? `, issuer schema ${outcome.record.issuerSchemaId}` : ''}) · environment {outcome.record.environment} ·
-            nullifier {outcome.record.nullifier} · {new Date(outcome.record.verifiedAtMs).toISOString()}
+            {outcome.record.vendorId}: payout <span className="break-all font-mono text-xs">{outcome.record.newPayoutAddress}</span>, EVM identity{' '}
+            <span className="break-all font-mono text-xs">{outcome.record.newEvmAddress}</span>
           </div>
           <div className="mt-1 text-xs">
+            Credential: {outcome.record.credentialType} (World ID {outcome.record.protocolVersion}
+            {outcome.record.issuerSchemaId !== null ? `, issuer schema ${outcome.record.issuerSchemaId}` : ''}) · environment {outcome.record.environment} ·
+            nullifier <span className="break-all font-mono">{outcome.record.nullifier}</span> · {new Date(outcome.record.verifiedAtMs).toISOString()}
+          </div>
+          <div className="mt-2 text-xs">
             Nothing is paid and the vendor master is unchanged. The payer&apos;s AP controller still has to approve the held invoice with their own World
             ID step-up, which only succeeds because this request matches it.
           </div>
-        </div>
+        </Notice>
       )}
     </div>
   );
