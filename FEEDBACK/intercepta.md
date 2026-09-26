@@ -71,3 +71,19 @@ Package: `packages/intercepta-adapter`. Base observed live: `https://api.web3ant
   this package's live "screen a real mainnet address before payment" qualification can actually run —
   everything up to that point (endpoints, schemas, error handling, cache discipline) is built and
   tested against the real, documented API surface.
+
+## 2026-09-26 — first live keyed calls: `txsCount` is not always present
+
+The first real Deep Scan with a key, against the OFAC-listed Lazarus Group address
+`0x098b716b8aaf21512996dc57eb0615e2383e2f96`, returned `toxicScore: 100` and five traits:
+`known_scammer`, `sanction_address`, `blacklist` (risk 100 each),
+`sanction_address_communication` (risk 85) and `fake_phishing_transfer` (risk 0.54).
+
+The OAS marks `ToxicScoreTraitV2.txsCount` as required, but the first three traits came back
+with **no `txsCount` key at all**; only the last two had one. Our strict parser treated the
+response as malformed and failed closed, so the payment was refused, but for the wrong reason
+(PREMISE_UNRESOLVABLE instead of PREMISE_MISMATCH). Fixed by making `txsCount` optional in
+`parseToxicScoreResponse` while keeping every other key required and still rejecting
+undocumented keys. `risk` is also fractional in practice (0.54), which the docs don't show.
+After the fix the same invoice refuses with PREMISE_MISMATCH (claimed 0 traits, derived 5).
+Suggestion for the docs: mark `txsCount` optional, and document `risk`'s range.

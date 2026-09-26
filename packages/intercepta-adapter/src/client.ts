@@ -359,13 +359,21 @@ export function isDocumentedTraitName(name: string): name is TraitName {
   return (DOCUMENTED_TRAIT_NAMES as readonly string[]).includes(name);
 }
 
-/** OAS `ToxicScoreTraitV2`: all four fields required, fully confirmed. */
+/**
+ * OAS `ToxicScoreTraitV2`. The OAS marks all four fields required, but the LIVE API
+ * disagrees for `txsCount`: a real Deep Scan of the OFAC-listed Lazarus address on
+ * 2026-09-26 returned `known_scammer`, `sanction_address` and `blacklist` traits with
+ * NO `txsCount` key, while other traits in the same response carried one (evidence body
+ * stored under .data/intercepta/, logged in FEEDBACK/intercepta.md). So `txsCount` is
+ * treated as optional; every other key stays required and undocumented keys are still
+ * rejected.
+ */
 export interface ToxicScoreTrait {
-  /** "Risk level of the trait". Range UNCONFIRMED. Not used for any decision in this package. */
+  /** "Risk level of the trait". Range UNCONFIRMED (the live API returns fractions, e.g. 0.54). Not used for any decision in this package. */
   risk: number;
   name: TraitName;
-  /** "Number of detected transactions related to this trait". */
-  txsCount: number;
+  /** "Number of detected transactions related to this trait". Absent on some live traits (see above). */
+  txsCount?: number;
   description: string;
 }
 
@@ -490,19 +498,28 @@ export function parseToxicScoreResponse(json: unknown): ToxicScoreResponse {
   const traits = rawTraits.map((t: unknown, i: number): ToxicScoreTrait => {
     const at = `traits[${i}]`;
     if (!isPlainObject(t)) throw new InterceptaShapeError(`${at} must be an object`);
-    requireExactKeys(t, ['risk', 'name', 'txsCount', 'description'], at);
+    // Required keys must be present; `txsCount` is optional (see ToxicScoreTrait's doc);
+    // anything else is still rejected as undocumented.
+    requireKeys(t, ['risk', 'name', 'description'], at);
+    const extra = Object.keys(t).filter((k) => !['risk', 'name', 'txsCount', 'description'].includes(k));
+    if (extra.length > 0) {
+      throw new InterceptaShapeError(`${at} does not match the documented schema; undocumented ${extra.join(', ')}`);
+    }
     const name = t['name'];
     if (typeof name !== 'string' || !isDocumentedTraitName(name)) {
       throw new InterceptaShapeError(`${at}.name ${JSON.stringify(name)} is not in the documented trait enum`);
     }
-    const txsCount = requireFiniteNumber(t['txsCount'], `${at}.txsCount`);
-    if (!Number.isSafeInteger(txsCount) || txsCount < 0) {
-      throw new InterceptaShapeError(`${at}.txsCount must be a non-negative integer count, got ${txsCount}`);
+    let txsCount: number | undefined;
+    if (Object.prototype.hasOwnProperty.call(t, 'txsCount')) {
+      txsCount = requireFiniteNumber(t['txsCount'], `${at}.txsCount`);
+      if (!Number.isSafeInteger(txsCount) || txsCount < 0) {
+        throw new InterceptaShapeError(`${at}.txsCount must be a non-negative integer count, got ${txsCount}`);
+      }
     }
     return {
       risk: requireFiniteNumber(t['risk'], `${at}.risk`),
       name,
-      txsCount,
+      ...(txsCount !== undefined ? { txsCount } : {}),
       description: requireString(t['description'], `${at}.description`),
     };
   });
