@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-26T06:40:40.077Z",
+  "generatedAt": "2026-09-26T10:40:00.714Z",
   "coreScenarios": [
     {
       "name": "core-1-globex-fraudulent-payout-address",
@@ -205,10 +205,32 @@
       "derivedValue": "suspended"
     }
   ],
-  "optionalInterceptaScenario": {
-    "status": "skipped_no_key",
-    "reason": "INTERCEPTA_API_KEY is not set — the optional live Intercepta screen of the fraudulent payout address was NOT run. This is a visible skip, not a silent one (CLAUDE.md rule 7): no fake or mocked Intercepta result is substituted.",
-    "screenedAddress": "0xe218026a7210d04d19e4cc677f1c459c5ff353df6915b44e085397fdbdb89187"
+  "interceptaScreenScenario": {
+    "status": "not_run_missing_key",
+    "screenedAddress": "0x098b716b8aaf21512996dc57eb0615e2383e2f96",
+    "expected": {
+      "outcome": 1,
+      "reasonCode": 1
+    },
+    "actual": {
+      "outcome": 1,
+      "outcomeName": "REFUSED",
+      "reasonCode": 2,
+      "reasonCodeName": "PREMISE_UNRESOLVABLE"
+    },
+    "resolveFailures": [
+      {
+        "schema": "intercepta-risk",
+        "field": "payment.payTo.traitCount",
+        "args": [
+          "0x098b716b8aaf21512996dc57eb0615e2383e2f96"
+        ],
+        "errorName": "InterceptaKeyMissingError",
+        "message": "INTERCEPTA_API_KEY is not set, so no live Intercepta call can be made and no result exists. There is no fallback value (CLAUDE.md rule 1). Add this line to the repo-root .env: INTERCEPTA_API_KEY=<your key from https://intercepta.io/ethglobal>"
+      }
+    ],
+    "pass": false,
+    "reason": "not run: missing key. INTERCEPTA_API_KEY is not set, so no live Intercepta screen happened and no Intercepta result exists. enforce() failed closed: REFUSED / PREMISE_UNRESOLVABLE. No mocked or fallback response was substituted (CLAUDE.md rule 1)."
   },
   "allCorePassed": true
 }

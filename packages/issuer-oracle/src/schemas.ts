@@ -43,7 +43,7 @@
 
 import { fetchTicketTruth } from './tickets-fixture.js';
 import { fetchProductTruth } from './ecomm-fixture.js';
-import { fetchVendorTruth } from './vendor-fixture.js';
+import { fetchVendorTruth, type VendorTruth } from './vendor-fixture.js';
 
 export const issuerOracleTickets = {
   fields: {
@@ -111,5 +111,53 @@ export const issuerOracleVendors = {
       const truth = await fetchVendorTruth(vendorId);
       return truth === null ? null : BigInt(truth.payoutAddressLastChangedAt);
     },
+    /**
+     * The vendor's registered EVM identity (20-byte lowercase hex string), the
+     * address Intercepta screens — see `VendorTruth.evmAddress`. A string,
+     * compared with `op: 'eq'` like `vendor.payoutAddress`; `null` for an
+     * unknown vendor.
+     */
+    'vendor.evmAddress': async (vendorId: string): Promise<string | null> => {
+      const truth = await fetchVendorTruth(vendorId);
+      return truth === null ? null : truth.evmAddress;
+    },
   },
 };
+
+/**
+ * The same `vendor.*` fields as `issuerOracleVendors`, same return types,
+ * resolved against any vendor source. Pass `createVendorSource()` (from
+ * `./sources/select.ts`, which reads `VENDOR_MASTER_SOURCE=fixture|xero`) to
+ * build the field table from either the fixture or the live Xero source.
+ * `issuerOracleVendors` above is left as-is: the fixture-backed default.
+ *
+ * With the Xero source, `vendor.payoutAddressLastChangedAt` is Xero's
+ * `UpdatedDateUTC`, which records the last update to the contact, not a
+ * bank-change timestamp. See `./sources/xero.ts`.
+ */
+export function vendorTruthFields(source: (vendorId: string) => Promise<VendorTruth | null>) {
+  return {
+    fields: {
+      'vendor.payoutAddress': async (vendorId: string): Promise<string | null> => {
+        const truth = await source(vendorId);
+        return truth === null ? null : truth.payoutAddress;
+      },
+      'vendor.invoiceAmountUSD': async (vendorId: string): Promise<bigint | null> => {
+        const truth = await source(vendorId);
+        return truth === null ? null : BigInt(truth.invoiceAmountUSD);
+      },
+      'vendor.status': async (vendorId: string): Promise<string | null> => {
+        const truth = await source(vendorId);
+        return truth === null ? null : truth.status;
+      },
+      'vendor.payoutAddressLastChangedAt': async (vendorId: string): Promise<bigint | null> => {
+        const truth = await source(vendorId);
+        return truth === null ? null : BigInt(truth.payoutAddressLastChangedAt);
+      },
+      'vendor.evmAddress': async (vendorId: string): Promise<string | null> => {
+        const truth = await source(vendorId);
+        return truth === null ? null : truth.evmAddress;
+      },
+    },
+  };
+}

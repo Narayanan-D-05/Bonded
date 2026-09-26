@@ -12,3 +12,7 @@ export * from './tickets-fixture.js';
 export * from './ecomm-fixture.js';
 export * from './vendor-fixture.js';
 export * from './schemas.js';
+// Live vendor-master source (Xero Accounting API), selected by
+// VENDOR_MASTER_SOURCE=xero; the fixture stays the default. See sources/xero.ts.
+export * from './sources/xero.js';
+export * from './sources/select.js';

@@ -72,6 +72,34 @@ export function readFraudulentPayoutAddress(): `0x${string}` {
   return extractFraudulentPayoutAddress(html);
 }
 
+/** Matches `id="claimed-evm-identity" ... data-address="0x<40 hex>"` (a 20-byte EVM address). */
+const CLAIMED_EVM_IDENTITY_PATTERN = /id="claimed-evm-identity"[^>]*data-address="(0x[0-9a-fA-F]{40})"/;
+
+/**
+ * Parses the attacker's claimed EVM identity out of the spoofed page's own
+ * markup, exactly like `extractFraudulentPayoutAddress`: one source (the
+ * HTML), never a second hand-typed constant. Throws on drift.
+ *
+ * The value on the page is a real OFAC-listed address (see the note beside
+ * it in site/spoofed-invoice.html). It exists because Intercepta can screen
+ * only EVM addresses; the Sui payout address above cannot be screened.
+ */
+export function extractClaimedEvmIdentity(html: string): `0x${string}` {
+  const match = CLAIMED_EVM_IDENTITY_PATTERN.exec(html);
+  if (match === null) {
+    throw new Error(
+      'naive-ap-agent: could not find #claimed-evm-identity[data-address] (0x + 40 hex) in the spoofed invoice HTML — ' +
+        'the page markup and this parser have drifted out of sync.',
+    );
+  }
+  return match[1] as `0x${string}`;
+}
+
+/** Reads `site/spoofed-invoice.html` off disk and extracts the claimed EVM identity. */
+export function readClaimedEvmIdentity(): `0x${string}` {
+  return extractClaimedEvmIdentity(readFileSync(spoofedInvoicePath(), 'utf8'));
+}
+
 /**
  * The naive AP agent's payment proposal: it read a vendor id, a claimed
  * payout address (from the spoofed page, unverified), and a claimed invoice
@@ -81,6 +109,8 @@ export function readFraudulentPayoutAddress(): `0x${string}` {
 export interface NaivePaymentProposal {
   vendorId: string;
   claimedPayoutAddress: `0x${string}`;
+  /** The payee's claimed EVM identity (20-byte), read off the same spoofed page. Screened, never settled to. */
+  claimedPayeeEvmAddress: `0x${string}`;
   claimedInvoiceAmountUSD: string;
 }
 
@@ -95,6 +125,7 @@ export function proposeNaivePayment(vendorId: string, claimedInvoiceAmountUSD: s
   return {
     vendorId,
     claimedPayoutAddress: readFraudulentPayoutAddress(),
+    claimedPayeeEvmAddress: readClaimedEvmIdentity(),
     claimedInvoiceAmountUSD,
   };
 }

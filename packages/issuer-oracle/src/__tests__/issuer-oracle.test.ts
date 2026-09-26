@@ -150,6 +150,7 @@ describe('fetchVendorTruth', () => {
       invoiceAmountUSD: '1250000000',
       status: 'active',
       payoutAddressLastChangedAt: 1736899200,
+      evmAddress: '0xec07a00bcc0e68b93dd8100b6488d4ec4bfeb5a1',
     });
   });
 
@@ -162,6 +163,7 @@ describe('fetchVendorTruth', () => {
       invoiceAmountUSD: '8450000000',
       status: 'active',
       payoutAddressLastChangedAt: 1790172000,
+      evmAddress: '0x98062f7075cd7a6b07379e88eb76e978fad188f6',
     });
     // the recent change is more recent than acme-supplies' old one — the
     // legitimate-bank-change signal this vendor exists to represent
@@ -237,5 +239,38 @@ describe('issuerOracleVendors.fields — resolvePremise adapter convention', () 
     await expect(
       issuerOracleVendors.fields['vendor.payoutAddressLastChangedAt']('vnd-does-not-exist'),
     ).resolves.toBeNull();
+  });
+
+  // Added with the EVM-identity screening change: the vendor's registered
+  // on-chain identity (screened by Intercepta), distinct from the Sui
+  // settlement payoutAddress. Synthetic, like the rest of this fixture.
+  it('vendor.evmAddress resolves the registered EVM identity for each seeded vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.evmAddress']('vnd-acme-supplies')).resolves.toBe(
+      '0xec07a00bcc0e68b93dd8100b6488d4ec4bfeb5a1',
+    );
+    await expect(issuerOracleVendors.fields['vendor.evmAddress']('vnd-globex-freight')).resolves.toBe(
+      '0x98062f7075cd7a6b07379e88eb76e978fad188f6',
+    );
+    await expect(issuerOracleVendors.fields['vendor.evmAddress']('vnd-suspended-corp')).resolves.toBe(
+      '0x3dedb65cd8aed5a70842a9c7ca3dff4a6f83f39f',
+    );
+  });
+
+  it('vendor.evmAddress resolves to null for an unknown vendor', async () => {
+    await expect(issuerOracleVendors.fields['vendor.evmAddress']('vnd-does-not-exist')).resolves.toBeNull();
+  });
+});
+
+describe('VendorTruth.evmAddress shape', () => {
+  it('every seeded vendor has a 20-byte lowercase EVM address, distinct from its 32-byte Sui payoutAddress', async () => {
+    const seen = new Set<string>();
+    for (const id of ['vnd-acme-supplies', 'vnd-globex-freight', 'vnd-suspended-corp']) {
+      const truth = await fetchVendorTruth(id);
+      expect(truth).not.toBeNull();
+      expect(truth!.evmAddress).toMatch(/^0x[0-9a-f]{40}$/);
+      expect(truth!.payoutAddress).toMatch(/^0x[0-9a-fA-F]{64}$/);
+      seen.add(truth!.evmAddress);
+    }
+    expect(seen.size).toBe(3);
   });
 });
