@@ -4,10 +4,9 @@ This file is read automatically by Claude Code at the start of every session in 
 so discipline survives contact with a live deadline, across every session, even ones where the PRD
 itself isn't open.
 
-**Read `BONDED_COMMERCE_MIGRATION_PRD.md` in full before writing any code in a new session, alongside
-`BONDED_IMPLEMENTATION_PRD.md` (the base it migrates from — the enforcer, seam and money discipline
-are specified there in full and carry over largely unchanged).** These are the spec. This file is the
-set of rules for *how* to work from it, not a replacement for it.
+**Read `BONDED_PRD.md` in full before writing any code in a new session, and `sponsers.md` for the
+sponsor detail.** That is the spec, describing what is actually built, in the present tense, as fact.
+This file is the set of rules for *how* to work from it, not a replacement for it.
 
 Sponsors for this build: **Intercepta, World (ID for Agents), Sui.** Curvegrid/MultiBaas is out of
 scope — dropped by the user's explicit direction, not by the PRD's own cut order.
