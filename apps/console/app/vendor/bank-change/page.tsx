@@ -5,7 +5,8 @@ import { VendorBankChangeForm, type VendorOption } from './VendorBankChangeForm'
 import { formatUtc } from '../../../components/ui/format';
 import { Notice } from '../../../components/ui/Notice';
 import { Panel } from '../../../components/ui/Panel';
-import { PageHeader } from '../../../components/ui/PageHeader';
+import { Accent, PageHero, Section } from '../../../components/ui/PageHeader';
+import { SponsorLogo, SponsorTag } from '../../../components/ui/SponsorLogo';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,10 +41,14 @@ export default async function VendorBankChangePage() {
   }
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        kicker="Form V-1 · Vendor portal"
-        title="Change bank details"
+    <>
+      <PageHero
+        eyebrow="Form V-1 · Vendor portal · World IDKit"
+        title={
+          <>
+            Change your bank details, <Accent>provably.</Accent>
+          </>
+        }
         lede={
           <>
             You are the vendor&apos;s representative. A request to change where your invoices are paid is accepted only if you verify with World ID
@@ -53,54 +58,93 @@ export default async function VendorBankChangePage() {
           </>
         }
       >
-        <p className="mt-4 text-sm text-fog">
+        <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <SponsorTag sponsor="world" size={24} label="Verified with World ID via IDKit (passport)" className="text-sm font-medium text-navy" />
+        </div>
+        <p className="mt-6 text-sm text-muted">
           Demo scenario: the defaults below are the new details claimed by invoice{' '}
-          <Link href="/invoices/inv-halcyon-bank-change" className="font-mono text-manifest underline underline-offset-2 hover:text-white">
+          <Link href="/invoices/inv-halcyon-bank-change" className="font-mono text-sui underline underline-offset-2 hover:text-navy">
             inv-halcyon-bank-change
           </Link>
           .
         </p>
-      </PageHeader>
+      </PageHero>
 
-      <Panel label="Bank-change request · verified with World ID (IDKit)">
-        <VendorBankChangeForm vendors={vendors} defaults={defaults} />
-      </Panel>
+      <Section tone="deep" eyebrow="File a request" title="Bank-change request">
+        <Panel label="Bank-change request · verified with World ID (IDKit)" sponsor="world" className="max-w-4xl">
+          <VendorBankChangeForm vendors={vendors} defaults={defaults} />
+        </Panel>
+      </Section>
 
-      <section aria-labelledby="on-file">
-        <h2 id="on-file" className="mb-3 text-xl font-semibold tracking-tight">
-          Verified requests on file
-        </h2>
+      <Section
+        tone="band"
+        eyebrow="How your request is checked"
+        title="Two people, two World ID checks, one address"
+        lede="A bank change is the moment Business Email Compromise targets, so it needs both sides to prove who they are."
+      >
+        <ol className="grid gap-5 md:grid-cols-3">
+          <Panel as="li" label="1 · You verify" sponsor="world">
+            <p className="text-sm leading-relaxed text-muted">
+              IDKit asks World for a proof from your passport credential. The server signs the request and binds this vendor, payout address and EVM
+              identity into the proof&apos;s signal, then verifies the result with World before recording it.
+            </p>
+          </Panel>
+          <Panel as="li" label="2 · The invoice is held">
+            <p className="text-sm leading-relaxed text-muted">
+              When an invoice claims the new address, Bonded sees it differs from the vendor master and holds the payment. Nothing is paid to an
+              address the records do not hold.
+            </p>
+          </Panel>
+          <Panel as="li" label="3 · The payer approves" sponsor="world">
+            <p className="text-sm leading-relaxed text-muted">
+              The payer&apos;s controller approves with their own fresh World ID check. It succeeds only if it matches a verified request filed here;
+              then the vendor record is updated and the invoice clears and settles on Sui.
+            </p>
+          </Panel>
+        </ol>
+      </Section>
+
+      <Section tone="deep" eyebrow="Records" title="Verified requests on file">
         {storeError && (
           <Notice tone="error" role="alert" title="The request store could not be read">
             <span className="font-mono text-xs">{storeError}</span>
           </Notice>
         )}
-        {!storeError && requests.length === 0 && <p className="text-sm text-fog">None yet.</p>}
-        {requests.length > 0 && (
-          <ul className="divide-y divide-hairline rounded-doc border border-hairline bg-deepwater">
-            {[...requests].reverse().map((r) => (
-              <li key={`${r.nullifier}-${r.signalHash}`} className="px-4 py-3 text-sm sm:px-5">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <span className="font-semibold text-manifest">{r.vendorId}</span>
-                  <span className="font-mono text-xs text-fog">{formatUtc(r.verifiedAtMs)}</span>
-                </div>
-                <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[8rem_minmax(0,1fr)]">
-                  <dt className="text-fog">Payout</dt>
-                  <dd className="break-all font-mono text-manifest">{r.newPayoutAddress}</dd>
-                  <dt className="text-fog">EVM identity</dt>
-                  <dd className="break-all font-mono text-manifest">{r.newEvmAddress}</dd>
-                  <dt className="text-fog">Credential</dt>
-                  <dd className="text-manifest">
-                    {r.credentialType} (World ID {r.protocolVersion}) · {r.environment} · action <span className="font-mono">{r.action}</span>
-                  </dd>
-                  <dt className="text-fog">Nullifier</dt>
-                  <dd className="break-all font-mono text-manifest">{r.nullifier}</dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
+        {!storeError && requests.length === 0 && (
+          <Panel label="Requests" sponsor="world">
+            <p className="text-sm text-muted">None yet.</p>
+          </Panel>
         )}
-      </section>
-    </div>
+        {requests.length > 0 && (
+          <Panel label="Requests" sponsor="world" aside={`${requests.length} on file`} bodyClassName="">
+            <ul className="divide-y divide-rule">
+              {[...requests].reverse().map((r) => (
+                <li key={`${r.nullifier}-${r.signalHash}`} className="px-5 py-4 text-sm sm:px-6">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <span className="inline-flex items-center gap-2 font-semibold text-navy">
+                      <SponsorLogo sponsor="world" size={16} />
+                      {r.vendorId}
+                    </span>
+                    <span className="font-mono text-xs text-muted">{formatUtc(r.verifiedAtMs)}</span>
+                  </div>
+                  <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[8rem_minmax(0,1fr)]">
+                    <dt className="text-muted">Payout</dt>
+                    <dd className="break-all font-mono text-navy">{r.newPayoutAddress}</dd>
+                    <dt className="text-muted">EVM identity</dt>
+                    <dd className="break-all font-mono text-navy">{r.newEvmAddress}</dd>
+                    <dt className="text-muted">Credential</dt>
+                    <dd className="text-navy">
+                      {r.credentialType} (World ID {r.protocolVersion}) · {r.environment} · action <span className="font-mono">{r.action}</span>
+                    </dd>
+                    <dt className="text-muted">Nullifier</dt>
+                    <dd className="break-all font-mono text-navy">{r.nullifier}</dd>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+      </Section>
+    </>
   );
 }
