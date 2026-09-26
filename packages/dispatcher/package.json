@@ -1,0 +1,37 @@
+{
+  "name": "@bonded/dispatcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The resolvePremise() router — dispatches a Premise's schema/field to whichever adapter's field table owns it (issuer-oracle, intercepta-risk, ...), plus the real canonicalHash/computeLogRef EnforceDeps composition helper. This is the piece enforce.ts's own header already assumed existed; nothing else in the repo implements it.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs"
+  },
+  "dependencies": {
+    "@bonded/seam": "workspace:*"
+  },
+  "devDependencies": {
+    "@bonded/enforcer": "workspace:*",
+    "@bonded/issuer-oracle": "workspace:*",
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  }
+}
