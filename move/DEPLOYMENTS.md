@@ -190,3 +190,17 @@ Not run live: the globex bank-change and halcyon ($15,000, `settle_with_stepup`)
 `INTERCEPTA_API_KEY` (their screen fails closed without it: REFUSED / PREMISE_UNRESOLVABLE, observed in
 the same dev-server run) and World sandbox credentials (`/api/stepup` answered 501 naming the three
 missing vars).
+
+## Demo reset (`pnpm --filter @bonded/console demo:reset`)
+
+Each reset archives the console's local demo state to `.data/archive/<timestamp>/` and creates a
+fresh `Vault<USDSUI>`, because the policy budget is a vault-lifetime total checked against the
+vault's on-chain `spent_this_period`, which never resets. The previous vault keeps its full history.
+
+| Date | Step | Digest | Result |
+|---|---|---|---|
+| 2026-09-26 | create + share `Vault<USDSUI>` | [`z91iPyBe…ZU22`](https://suiscan.xyz/testnet/tx/z91iPyBepYiqkoQsfMnmGcT533p4CdtBXUwxs72ZU22) | new vault `0xd623ea50911cf9d9408e8e34e1f18d366ed3d14b25ac9ad82a3a18e88f985849` |
+| 2026-09-26 | `coin::mint` 40,000 USDSUI + `fund_vault` | [`2s9aSiVy…Rk3D`](https://suiscan.xyz/testnet/tx/2s9aSiVyjkHrhYqAdTxuHzya6pjC9aAwdyNrJzF9Rk3D) | vault balance 40,000,000,000 |
+
+Before this reset, the previous vault `0x1c828f54…dd433` settled acme ($1,250), the globex bank
+change ($8,450) and halcyon ($15,000, `settle_with_stepup`).
