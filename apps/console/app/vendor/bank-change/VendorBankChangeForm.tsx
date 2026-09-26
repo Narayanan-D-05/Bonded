@@ -141,15 +141,15 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
   const locked = session !== null;
 
   const inputClass =
-    'mt-1.5 block w-full min-w-0 rounded-control border border-hairline bg-harbor px-3 py-2 font-mono text-xs text-manifest focus:border-fog focus:outline-none disabled:opacity-60';
+    'mt-1.5 block w-full min-w-0 rounded-xl border border-rule bg-raised px-3 py-2 font-mono text-xs text-navy focus:border-sui focus:outline-none disabled:opacity-60';
 
   return (
     <div>
       <div className="space-y-5">
         <label className="block text-sm">
-          <span className="font-medium text-manifest">Vendor</span>
+          <span className="font-medium text-navy">Vendor</span>
           <select
-            className="mt-1.5 block w-full min-w-0 rounded-control border border-hairline bg-harbor px-3 py-2 text-sm text-manifest focus:border-fog focus:outline-none disabled:opacity-60"
+            className="mt-1.5 block w-full min-w-0 rounded-xl border border-rule bg-raised px-3 py-2 text-sm text-navy focus:border-sui focus:outline-none disabled:opacity-60"
             value={vendorId}
             disabled={locked}
             onChange={(e) => setVendorId(e.target.value)}
@@ -162,19 +162,19 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
           </select>
         </label>
         {selected && (
-          <dl className="grid gap-x-4 gap-y-1 rounded-doc border border-hairline bg-harbor/60 px-3 py-2 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">
-            <dt className="text-fog">On file: payout</dt>
-            <dd className="break-all font-mono text-manifest">{selected.payoutAddress}</dd>
-            <dt className="text-fog">Registered EVM identity</dt>
-            <dd className="break-all font-mono text-manifest">{selected.evmAddress}</dd>
+          <dl className="grid gap-x-4 gap-y-1 rounded-xl border border-rule bg-raised px-3 py-2 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <dt className="text-muted">On file: payout</dt>
+            <dd className="break-all font-mono text-navy">{selected.payoutAddress}</dd>
+            <dt className="text-muted">Registered EVM identity</dt>
+            <dd className="break-all font-mono text-navy">{selected.evmAddress}</dd>
           </dl>
         )}
         <label className="block text-sm">
-          <span className="font-medium text-manifest">New Sui payout address</span>
+          <span className="font-medium text-navy">New Sui payout address</span>
           <input className={inputClass} value={newPayoutAddress} disabled={locked} spellCheck={false} onChange={(e) => setNewPayoutAddress(e.target.value)} />
         </label>
         <label className="block text-sm">
-          <span className="font-medium text-manifest">New EVM identity</span>
+          <span className="font-medium text-navy">New EVM identity</span>
           <input className={inputClass} value={newEvmAddress} disabled={locked} spellCheck={false} onChange={(e) => setNewEvmAddress(e.target.value)} />
         </label>
       </div>
@@ -199,10 +199,10 @@ export function VendorBankChangeForm({ vendors, defaults }: { vendors: VendorOpt
 
       {session && (
         <dl className="mt-4 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[10rem_minmax(0,1fr)]">
-          <dt className="text-fog">Signal bound into the proof</dt>
-          <dd className="break-all font-mono text-manifest">{session.signal}</dd>
-          <dt className="text-fog">Action · environment</dt>
-          <dd className="break-all font-mono text-manifest">
+          <dt className="text-muted">Signal bound into the proof</dt>
+          <dd className="break-all font-mono text-navy">{session.signal}</dd>
+          <dt className="text-muted">Action · environment</dt>
+          <dd className="break-all font-mono text-navy">
             {session.action} · {session.environment}
           </dd>
         </dl>

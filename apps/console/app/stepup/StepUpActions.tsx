@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { buttonClass } from '../../components/ui/button';
 import { Notice } from '../../components/ui/Notice';
+import { SponsorLogo } from '../../components/ui/SponsorLogo';
 
 interface StartResponse {
   authUrl: string;
@@ -54,16 +55,20 @@ export function StepUpActions({ proposalHash }: { proposalHash: string }) {
   }
 
   return (
-    <section aria-labelledby="stepup-action" className="rounded-doc border border-hold/60 bg-deepwater">
-      <header className="border-b border-hairline px-4 py-2.5 sm:px-5">
-        <h2 id="stepup-action" className="font-mono text-xs font-semibold uppercase tracking-[0.16em] text-hold">
+    <section aria-labelledby="stepup-action" className="box">
+      <header className="box-head flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 sm:px-6">
+        <h2 id="stepup-action" className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-[0.16em] text-navy">
+          <span className="inline-flex rounded-full bg-white p-1 ring-1 ring-rule">
+            <SponsorLogo sponsor="world" size={18} />
+          </span>
           Approve with a fresh World ID check
         </h2>
+        <span className="rounded-full bg-white px-3 py-0.5 text-xs font-semibold text-held">Held · nothing paid yet</span>
       </header>
-      <div className="px-4 py-4 sm:px-5">
-        <p className="mb-1 text-sm text-fog">Proposal</p>
-        <p className="mb-4 break-all font-mono text-xs text-manifest">{proposalHash}</p>
-        <p className="mb-4 max-w-2xl text-sm leading-relaxed text-fog">
+      <div className="px-5 py-5 sm:px-6">
+        <p className="mb-1 text-sm text-muted">Proposal</p>
+        <p className="mb-4 break-all font-mono text-xs text-navy">{proposalHash}</p>
+        <p className="mb-5 max-w-2xl text-sm leading-relaxed text-muted">
           This starts the World sandbox authorization for this one proposal. Nothing is approved by this button itself: World verifies the
           person, and the callback re-derives the verdict before anything is paid or changed.
         </p>
