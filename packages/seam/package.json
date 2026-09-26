@@ -1,0 +1,31 @@
+{
+  "name": "@bonded/seam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Canonical Hostage Protocol types and fixed-point money (stake pricing), defined once with zero runtime dependencies.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.4.0"
+  }
+}

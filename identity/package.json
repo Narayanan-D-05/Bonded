@@ -1,0 +1,36 @@
+{
+  "name": "@bonded/identity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "World ID for Agents sandbox flow and the Recovery Desk, validated server-side.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --passWithNoTests"
+  },
+  "dependencies": {
+    "@bonded/seam": "workspace:*",
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}

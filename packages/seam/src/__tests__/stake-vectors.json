@@ -1,0 +1,86 @@
+[
+  {
+    "price": "1",
+    "riskBps": 0,
+    "multiplierBps": 10500,
+    "requiredStake": "2"
+  },
+  {
+    "price": "1",
+    "riskBps": 6000,
+    "multiplierBps": 19500,
+    "requiredStake": "2"
+  },
+  {
+    "price": "1",
+    "riskBps": 10000,
+    "multiplierBps": 25500,
+    "requiredStake": "3"
+  },
+  {
+    "price": "19",
+    "riskBps": 0,
+    "multiplierBps": 10500,
+    "requiredStake": "20"
+  },
+  {
+    "price": "20",
+    "riskBps": 0,
+    "multiplierBps": 10500,
+    "requiredStake": "21"
+  },
+  {
+    "price": "7",
+    "riskBps": 5000,
+    "multiplierBps": 18000,
+    "requiredStake": "13"
+  },
+  {
+    "price": "999999",
+    "riskBps": 1,
+    "multiplierBps": 10501,
+    "requiredStake": "1050099"
+  },
+  {
+    "price": "1000000",
+    "riskBps": 6000,
+    "multiplierBps": 19500,
+    "requiredStake": "1950000"
+  },
+  {
+    "price": "1000000",
+    "riskBps": 10000,
+    "multiplierBps": 25500,
+    "requiredStake": "2550000"
+  },
+  {
+    "price": "2500000",
+    "riskBps": 3333,
+    "multiplierBps": 15499,
+    "requiredStake": "3874750"
+  },
+  {
+    "price": "123456789012",
+    "riskBps": 9999,
+    "multiplierBps": 25498,
+    "requiredStake": "314790120623"
+  },
+  {
+    "price": "7000000000000000000",
+    "riskBps": 0,
+    "multiplierBps": 10500,
+    "requiredStake": "7350000000000000000"
+  },
+  {
+    "price": "1000000000000000",
+    "riskBps": 10000,
+    "multiplierBps": 25500,
+    "requiredStake": "2550000000000000"
+  },
+  {
+    "price": "5000000",
+    "riskBps": 6000,
+    "multiplierBps": 19500,
+    "requiredStake": "9750000"
+  }
+]

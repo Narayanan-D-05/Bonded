@@ -1,0 +1,39 @@
+{
+  "name": "@bonded/agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Buyer and seller agents, and live Intercepta risk pricing (PRD C.2, C.3).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "tsc -p tsconfig.test.json && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --passWithNoTests"
+  },
+  "dependencies": {
+    "@bonded/seam": "workspace:*",
+    "@bonded/ens": "workspace:*",
+    "@bonded/identity": "workspace:*",
+    "@bonded/curvegrid": "workspace:*",
+    "@mysten/sui": "^2.33.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}

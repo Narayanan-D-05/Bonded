@@ -1,0 +1,66 @@
+# Dependency dirs
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+.next
+out
+build
+*.tsbuildinfo
+apps/console/next-env.d.ts
+
+# Turbo cache
+.turbo
+
+# Foundry artifacts
+
+# Environment — real values never committed
+.env
+.env.local
+.env.production
+secrets.env
+secrets.env.enc
+
+# Media — screen recordings stay out of git by default (they can be large and
+# are regenerated per demo run). The hero background is the exception: it's
+# load-bearing for the landing page, so a fresh clone must get it rather than
+# silently degrading to the CSS gradient fallback.
+apps/console/public/media/*.mp4
+!apps/console/public/media/hero-background.mp4
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+*.swp
+
+# Claude Code local session state
+.claude/
+
+# Scratch CRE hello-world scaffold used only to verify the CLI/SDK setup —
+# not part of the Bonded product; the real CRE integration lives in
+# packages/authority.
+
+# graph-cli build output
+.next-verify
+.pending-proposal.json
+.data/
+
+# CRE deploy build output
+
+# Presentation deck — local only for now, deliberately not published.
+# Includes the react-bits backdrops it pulls in and the shadcn config added
+# solely to fetch them.
+apps/console/app/deck/
+apps/console/components/deck/
+apps/console/components/GradientWaves.jsx
+apps/console/components/GradientWaves.css
+apps/console/components/Grainient.jsx
+apps/console/components/Grainient.css
+apps/console/components.json
+
+# Move build output
+move/bonded/build/

@@ -1,0 +1,8 @@
+[package]
+name = "bonded"
+edition = "2024"
+
+[dependencies]
+
+[addresses]
+bonded = "0x0"

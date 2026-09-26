@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  # The original attack corpus belongs to the ETHOnline mechanism. Its results.json is a
+  # recorded artifact and is never modified; excluding it here keeps pnpm from resolving
+  # its now-removed workspace dependencies without touching its files. The Commerce
+  # Edition's villain harness lives in packages/villain-corpus instead.
+  - "!packages/attack-corpus"

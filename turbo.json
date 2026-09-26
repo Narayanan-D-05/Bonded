@@ -1,0 +1,60 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "//": "Turborepo hides env vars from tasks unless declared, and declared values join the task hash. Commerce Edition names only (Intercepta, Sui, World) — nothing here is a secret value.",
+  "globalEnv": [
+    "INTERCEPTA_API_KEY",
+    "SUI_NETWORK",
+    "SUI_RPC_URL",
+    "SUI_BONDED_PACKAGE_ID",
+    "SUI_BOND_COIN_TYPE",
+    "WORLD_SANDBOX_CLIENT_ID",
+    "WORLD_SANDBOX_CLIENT_SECRET",
+    "WORLD_REDIRECT_URI",
+    "NEXT_PUBLIC_SUI_NETWORK"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env*"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$"
+      ]
+    },
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$"
+      ]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}
