@@ -29,9 +29,9 @@ export function SiteFooter() {
         </ul>
       </section>
 
-      <div className="relative flex min-h-[380px] w-full flex-col justify-end overflow-hidden bg-white md:min-h-[62vh]">
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[82%] opacity-[0.55]" aria-hidden="true">
-          <Image src="/media/end.png" alt="" fill sizes="100vw" className="glyph-art-light object-cover object-[center_38%]" />
+      <div className="relative flex min-h-[440px] w-full flex-col justify-end overflow-hidden bg-white md:min-h-[72vh]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[74%] opacity-[0.55]" aria-hidden="true">
+          <Image src="/media/end.png" alt="" fill sizes="100vw" className="glyph-art-light object-contain object-center" />
         </div>
         <div className="pointer-events-none relative z-10 w-full select-none overflow-hidden" aria-hidden="true">
           <span
