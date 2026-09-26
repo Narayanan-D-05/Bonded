@@ -51,6 +51,8 @@ const TEST_ENV = {
   [IDKIT_ENV.rpId]: 'rp_test_not_a_real_rp',
   [IDKIT_ENV.action]: 'vendor-bank-change',
   [IDKIT_ENV.environment]: 'staging',
+  // Our own placeholder, not a real Portal token: staging verify calls must carry one.
+  [IDKIT_ENV.stagingVerificationToken]: 'sk_test_not_a_real_token',
 };
 
 const claim = { vendorId: HALCYON, newPayoutAddress: HALCYON_NEW_BANK_PAYOUT_ADDRESS, newEvmAddress: HALCYON_EVM };
@@ -234,13 +236,13 @@ describe('pre-verify envelope checks (never vouch for a proof)', () => {
 });
 
 describe('submitVendorBankChange: every failure path records nothing', () => {
-  function deps(over: Partial<SubmitDeps> = {}): SubmitDeps & { calls: Array<{ url: string; body: string }> } {
-    const calls: Array<{ url: string; body: string }> = [];
+  function deps(over: Partial<SubmitDeps> = {}): SubmitDeps & { calls: Array<{ url: string; body: string; headers?: Record<string, string> }> } {
+    const calls: Array<{ url: string; body: string; headers?: Record<string, string> }> = [];
     return {
       env: TEST_ENV,
       // Records the request, then fails like a network error. Never answers as World.
       fetch: (async (url: string, init?: RequestInit) => {
-        calls.push({ url, body: String(init?.body) });
+        calls.push({ url, body: String(init?.body), headers: init?.headers as Record<string, string> });
         throw new TypeError('fetch failed (test stub: no network)');
       }) as unknown as typeof fetch,
       vendorSource: fetchVendorTruth,
@@ -284,8 +286,28 @@ describe('submitVendorBankChange: every failure path records nothing', () => {
     const b = body();
     const r = await submitVendorBankChange(b, d);
     expect(r).toMatchObject({ ok: false, status: 502, reason: 'verify_unreachable' });
-    expect(d.calls).toEqual([{ url: 'https://developer.world.org/api/v4/verify/rp_test_not_a_real_rp', body: JSON.stringify(b.idkitResult) }]);
+    expect(d.calls.map(({ url, body }) => ({ url, body }))).toEqual([{ url: 'https://developer.world.org/api/v4/verify/rp_test_not_a_real_rp', body: JSON.stringify(b.idkitResult) }]);
+    // Staging proofs carry the Portal staging-window token as a header.
+    expect(d.calls[0]!.headers?.['x-staging-verification-token']).toBe('sk_test_not_a_real_token');
     expect(verifyUrl('rp_x')).toBe('https://developer.world.org/api/v4/verify/rp_x');
     expect(existsSync(d.storePath)).toBe(false);
+  });
+});
+
+describe('staging verification token', () => {
+  it('staging without the Portal staging-window token: 501 naming it; World never called', async () => {
+    const calls: string[] = [];
+    const env = { ...TEST_ENV };
+    delete (env as Record<string, string>)[IDKIT_ENV.stagingVerificationToken];
+    const r = await submitVendorBankChange({ ...claim, idkitResult: {} }, {
+      env,
+      fetch: (async (url: string) => { calls.push(url); throw new TypeError('no network'); }) as unknown as typeof fetch,
+      vendorSource: fetchVendorTruth,
+      storePath: tempStore(),
+      now: () => 1_790_400_000_000,
+    });
+    expect(r).toMatchObject({ ok: false, status: 501, reason: 'missing_env' });
+    expect(!r.ok && r.missingEnv).toEqual(['WORLD_IDKIT_STAGING_VERIFICATION_TOKEN']);
+    expect(calls).toHaveLength(0);
   });
 });

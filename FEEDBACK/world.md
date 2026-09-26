@@ -117,3 +117,16 @@ this entry; the success path waits on the signing key and a Simulator / World Ap
 - **The one improvement with the most impact:** a Simulator (or sandbox) that issues World ID 4.0
   credentials, including Passport, with a documented per-environment credential matrix. Without it a
   builder can request the right credential but can only demo its legacy fallback.
+
+## 2026-09-26 — IDKit staging proofs need a "staging verification window" (undocumented)
+
+The first Simulator proof sent to `POST /api/v4/verify/{rp_id}` came back
+`environment_not_allowed: Staging verification is not open for this app`. Nothing in the IDKit
+integrate/verify docs mentions this. The fix was only reachable through the Developer Portal MCP
+(`https://developer.world.org/api/mcp`): `set_world_id_staging_verification` opens a ~24h window and
+returns a one-time token that must be sent as an `x-staging-verification-token` header on every
+staging/sandbox verify call. The web dashboard has no control for it. Two more surprises in the same
+pass: the dashboard created our action as `production` with no environment choice (the staging
+action had to be created through the MCP `create_world_id_action`), and a single app holds separate
+staging and production actions under the same identifier. Suggested improvement: document the
+staging window and header on the verify page, and expose both in the dashboard.
