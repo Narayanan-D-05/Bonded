@@ -235,9 +235,6 @@ export interface ScanEvidence {
  * confirmed gitignored (`.gitignore` line `.data/`).
  */
 export function defaultEvidenceDir(startDir: string = process.cwd()): string {
-  // Explicit directory, e.g. on a host with no workspace checkout (Vercel).
-  const override = process.env['BONDED_INTERCEPTA_EVIDENCE_DIR']?.trim();
-  if (override) return resolve(override);
   let dir = resolve(startDir);
   for (;;) {
     if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return join(dir, '.data', 'intercepta');
